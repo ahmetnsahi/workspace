@@ -1346,3 +1346,5 @@
 145	298	7539167605469166	C:/Users/ahmet/workspace/ESP_STM32_OTA/build/bootloader/bootloader.elf	5abd2e260a9a4cef
 145	298	7539167605469166	C:/Users/ahmet/workspace/ESP_STM32_OTA/build/bootloader/bootloader.bin	5abd2e260a9a4cef
 145	298	7539167605469166	C:/Users/ahmet/workspace/ESP_STM32_OTA/build/bootloader/bootloader.map	5abd2e260a9a4cef
+298	27912	0	CMakeFiles/flash	7f6460d37113905f
+298	27912	0	C:/Users/ahmet/workspace/ESP_STM32_OTA/build/CMakeFiles/flash	7f6460d37113905f
