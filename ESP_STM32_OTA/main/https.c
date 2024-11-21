@@ -47,6 +47,16 @@ static const esp_partition_t *update_partition = NULL;
 
 
 
+static esp_err_t _http_client_init_cb(esp_http_client_handle_t http_client)
+{
+    esp_err_t err = ESP_OK;
+    /* Uncomment to add custom headers to HTTP request */
+    // err = esp_http_client_set_header(http_client, "Custom-Header", "Value");
+    return err;
+}
+
+
+
 void download_binary_file(const char *url) {
 	
 esp_http_client_config_t config = {
@@ -117,40 +127,79 @@ esp_http_client_config_t config = {
 }
 
 
+
+
 void http_ota_task(const char *url) {
     ESP_LOGI(TAG, "Starting OTA update...");
     
-      esp_http_client_config_t config = {
-       .url = url,
-    .timeout_ms = 5000,
-    .cert_pem = server_cert_pem_start,
-    .cert_len = server_cert_pem_end - server_cert_pem_start,
-    .user_agent = "eps32",
-    .keep_alive_enable = true,
-    .transport_type = HTTP_TRANSPORT_OVER_SSL,
-
-};
+    esp_http_client_config_t config = {
+        .url = url,
+        .timeout_ms = 5000,
+        .cert_pem = server_cert_pem_start,
+        .cert_len = server_cert_pem_end - server_cert_pem_start,
+        .user_agent = "eps32",
+        .keep_alive_enable = true,
+        .transport_type = HTTP_TRANSPORT_OVER_SSL,
+    };
 
     esp_https_ota_config_t ota_config = {
         .http_config = &config,
-        .max_http_request_size=10240*2,
+        .http_client_init_cb=_http_client_init_cb,
+        .max_http_request_size = 10240,
+        .partial_http_download=false,
+        
         
         
     };
 
-    esp_err_t ret = esp_https_ota(&ota_config);
+    esp_https_ota_handle_t https_ota_handle ;
     
-    if (ret == ESP_OK) {
-        ESP_LOGI(TAG, "OTA Update completed successfully! Rebooting...");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-        esp_restart();
-    } else {
-        ESP_LOGE(TAG, "OTA Update failed with error: %s", esp_err_to_name(ret));
+    esp_err_t ret = esp_https_ota_begin(&ota_config, &https_ota_handle);
+    
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ESP HTTPS OTA Begin failed");
+        goto ota_end;
+    }
+        
+    esp_app_desc_t app_desc;
+    ret = esp_https_ota_get_img_desc(https_ota_handle, &app_desc);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "esp_https_ota_get_img_desc failed");
+        goto ota_end;
     }
 
+    while (1) {
+        ret = esp_https_ota_perform(https_ota_handle);
+        if (ret != ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
+            break;
+        }
+        // İlerleme yüzdesini hesapla ve göster
+        int image_size = esp_https_ota_get_image_size(https_ota_handle);
+        int image_downloaded = esp_https_ota_get_image_len_read(https_ota_handle);
+        float progress = ((float)image_downloaded / image_size) * 100;
+        ESP_LOGI(TAG, "Image size %d", image_downloaded);
+        ESP_LOGI(TAG, "OTA Progress: %.1f%%", progress);
+    }
+
+ota_end:
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "ESP HTTPS OTA upgrade failed: %s", esp_err_to_name(ret));
+    } else {
+        ret = esp_https_ota_finish(https_ota_handle);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "OTA Update completed successfully! Rebooting...");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            esp_restart();
+        } else {
+            ESP_LOGE(TAG, "ESP HTTPS OTA finish failed: %s", esp_err_to_name(ret));
+        }
+    }
+
+    if (https_ota_handle) {
+        esp_https_ota_abort(https_ota_handle);
+    }
     vTaskDelete(NULL);
 }
-
 
 
 void check_update_task(void *pvParameter)

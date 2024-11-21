@@ -2,10 +2,10 @@
 +----------------------------------------------------------------------------------+
 | Memory Type/Section   | Used [bytes] | Used [%] | Remain [bytes] | Total [bytes] |
 |-----------------------+--------------+----------+----------------+---------------|
-| Flash Code            |      1133350 |    33.91 |        2208954 |       3342304 |
-|    .text              |      1133350 |    33.91 |                |               |
-| Flash Data            |       283780 |     6.77 |        3910492 |       4194272 |
-|    .rodata            |       283524 |     6.76 |                |               |
+| Flash Code            |      1133854 |    33.92 |        2208450 |       3342304 |
+|    .text              |      1133854 |    33.92 |                |               |
+| Flash Data            |       284180 |     6.78 |        3910092 |       4194272 |
+|    .rodata            |       283924 |     6.77 |                |               |
 |    .appdesc           |          256 |     0.01 |                |               |
 | IRAM                  |       124327 |    94.85 |           6745 |        131072 |
 |    .text              |       123299 |    94.07 |                |               |
@@ -17,4 +17,4 @@
 |    .rtc_slow_reserved |           24 |     0.29 |                |               |
 +----------------------------------------------------------------------------------+
 C:\Espressif\python_env\idf5.3_py3.11_env\Scripts\python.exe C:/Espressif/frameworks/esp-idf-v5.3.1/\components\partition_table\gen_esp32part.py C:\Users\ahmet\workspace\ESP_STM32_OTA\build\partition_table\partition-table.bin
-Total time taken to build the project: 28.280 ms
+Total time taken to build the project: 352 ms
