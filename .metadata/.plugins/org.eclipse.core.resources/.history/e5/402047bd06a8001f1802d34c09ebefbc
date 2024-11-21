@@ -1,0 +1,171 @@
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+#include "Bootloader.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+#include "freertos/semphr.h"
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "esp_event.h"
+#include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_http_client.h"
+#include "esp_https_ota.h"
+#include "lwip/err.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+#include "cJSON.h"
+#include "esp_tls.h"
+#include "esp_crt_bundle.h"
+
+#define FIRMWARE_URL        "https://raw.githubusercontent.com/ahmetnsahi/workspace/main/ESP_STM32_OTA/build/app-template.bin"
+#define MAX_HTTP_BUFFER     8192
+
+static const char *TAG = "HTTPS_OTA";
+
+extern const char server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
+extern const char server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
+// Global değişkenler
+static volatile bool update_flag = false;
+static SemaphoreHandle_t update_mutex = NULL;
+
+#define MAX_HTTP_OUTPUT_BUFFER 2048
+// Dosyayı kaydetmek için buffer
+static char output_buffer[MAX_HTTP_OUTPUT_BUFFER];
+static int output_len = 0;
+static int total_read = 0;
+#define MAX_BUFFER_SIZE 1024
+static esp_ota_handle_t ota_handle = 0;
+static const esp_partition_t *update_partition = NULL;
+// Binary dosyayı hafızada tutacak global değişken
+// HTTP event handler
+
+
+
+
+
+
+#include "esp_http_client.h"
+#include "esp_log.h"
+
+#define TAG "HTTP_CLIENT"
+
+// Buffer size
+#define BUFFER_SIZE 4096
+
+// HTTP event handler (istek ve cevapları işlemek için)
+esp_err_t http_event_handler(esp_http_client_event_t *evt) {
+    switch (evt->event_id) {
+    case HTTP_EVENT_ON_DATA:
+        ESP_LOGI(TAG, "Gelen veri boyutu: %d", evt->data_len);
+        // Veri RAM'de işlem için burada kullanılabilir
+        // evt->data ile veri erişilebilir
+        break;
+    default:
+        break;
+    }
+    return ESP_OK;
+}
+
+void http_download_and_process() {
+    // GitHub'dan dosya indirilecek URL
+   
+
+    esp_http_client_config_t config = {
+        .url = FIRMWARE_URL,
+        .event_handler = http_event_handler, // Veri olaylarını yönlendiren handler
+        .buffer_size = BUFFER_SIZE,          // Okuma tampon boyutu
+        .timeout_ms=4000,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+
+    // HTTP bağlantısını başlat
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "HTTP bağlantısı başarısız: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        return;
+    }
+
+    // İndirilecek toplam dosya boyutunu alın
+    int content_length = esp_http_client_fetch_headers(client);
+    if (content_length < 0) {
+        ESP_LOGE(TAG, "İçerik boyutu alınamadı");
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return;
+    }
+    ESP_LOGI(TAG, "Toplam dosya boyutu: %d", content_length);
+
+    // Veriyi parça parça oku
+    char buffer[BUFFER_SIZE];
+    int total_read = 0;
+
+    while (total_read < content_length) {
+        int read_len = esp_http_client_read(client, buffer, BUFFER_SIZE);
+        if (read_len < 0) {
+            ESP_LOGE(TAG, "Veri okuma hatası");
+            break;
+        }
+        if (read_len == 0) {
+            ESP_LOGI(TAG, "Tüm veri okundu");
+            break;
+        }
+
+        // Okunan veriyi işleyin
+        ESP_LOGI(TAG, "Okunan veri boyutu: %d", read_len);
+        total_read += read_len;
+
+        // Burada buffer içeriği RAM'de işlenebilir
+        
+    }
+
+    ESP_LOGI(TAG, "Toplam okunan veri: %d", total_read);
+
+    // Bağlantıyı kapat
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+}
+
+// Veri işleme fonksiyonu
+void process_data(char *data, int len) {
+    ESP_LOGI(TAG, "Veri işleniyor: %.*s", len, data);
+    // Burada gelen veriyi işle
+}
+
+
+
+
+void check_update_task(void *pvParameter)
+{
+    update_mutex = xSemaphoreCreateMutex();
+    if (!update_mutex) {
+        ESP_LOGE(TAG, "Failed to create mutex");
+        return;
+    }
+
+    while (1) {
+        if (update_flag) {
+            if (xSemaphoreTake(update_mutex, portMAX_DELAY) == pdTRUE) {
+                update_flag = false;
+                http_download_and_process();
+                xSemaphoreGive(update_mutex);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+// OTA güncellemeyi başlat (dışarıdan çağrılabilir)
+void start_ota_update(void)
+{
+    if (update_mutex != NULL) {
+        if (xSemaphoreTake(update_mutex, portMAX_DELAY) == pdTRUE) {
+            update_flag = true;
+            xSemaphoreGive(update_mutex);
+        }
+    }
+}

@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;ESP_STM32_OTA/partitions.cvs&apos; to &apos;partitions.csv&apos;" description="Rename resource &apos;partitions.cvs&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="partitions.cvs" name="partitions.csv" stamp="1730745217049" updateReferences="true"/>
+</session>

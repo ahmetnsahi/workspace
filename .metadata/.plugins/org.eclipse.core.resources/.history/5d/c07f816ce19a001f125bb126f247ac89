@@ -1,0 +1,878 @@
+/*
+ * tcp.c
+ *
+ *  Created on: 30 Eyl 2024
+ *      Author: ahmet
+ */
+
+
+#include "arch/sys_arch.h"
+#include "driver/uart.h"
+#include "esp_log.h"
+#include "Bootloader.h"
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/_intsup.h>
+#include "esp_partition.h"
+#include "esp_private/gdma.h"
+#include "esp_spiffs.h"
+#include "esp_crc.h"
+#include "esp_ota_ops.h"
+#include "esp_netif.h"
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "lwip/sockets.h"
+#include "tcp.h"
+#include "uartread.h"
+#include "wifi.h"
+#include "main.h"
+#include "nvs.h"
+#include "command.h"
+
+#define DEFAULT_SERVER_PORT 5856  // Varsayılan port numarası (kendi portunuzu buraya yazın)
+#define SERVER_IP   "192.168.0.158"  // Sunucunun IP adresini buraya ekleyin
+#define TAG "TCP_CLIENT"
+
+
+#define  stm32_offset 0x8000000      //bootloader adres ve max yazılabilir packsize
+#define BLOCK_SIZE 256 // 256 byte
+
+int32_t port_number=DEFAULT_SERVER_PORT;
+char server_ip[16] = SERVER_IP;            
+volatile bool tcpmaincontrol=false;
+volatile bool tcpoutflag=false;
+volatile bool esprestartflag=false;
+volatile uint8_t esp_stm_flag=0;
+
+bool stm_ota_flag=false;
+bool esp_ota_flag=false;
+
+esp_ota_handle_t ota_handle=0;
+const esp_partition_t *ota_partition=NULL;
+const esp_partition_t *storage_partition=NULL;
+
+uint32_t current_crc = 0x00000000; // CRC başlangıç değer
+uint32_t verify_crc = 0x00000000; // Başlangıç CRC değeri
+size_t offset = 0;  // Veri başlangıç konumu
+uint16_t sizebuf = 4096;  // Önerilen blok boyutu
+
+
+int sock;
+
+ static uint8_t *buffer = NULL;
+ size_t buffer_size = 0;
+ size_t total_data_len = 0;
+ size_t total_data_stm_len = 0;
+
+ int offset_write=0;
+
+uint32_t Read_CRC=0;
+uint32_t Buffer_CRC=0;
+
+char rx_buffer[10240];  // Gelen veriyi almak için buffer
+uint32_t firmware_size=0 ;
+ 
+
+int tcp_connectx()
+{
+    struct sockaddr_in server_addr;
+    port_number = DEFAULT_SERVER_PORT;  // Varsayılan port numarası
+    char server_ip[16] = SERVER_IP;             // Varsayılan IP adresi
+    size_t ip_length = sizeof(server_ip);
+
+    // NVS işlemleri için gerekli değişkenler
+    nvs_handle_t nvs_handle;
+    esp_err_t err;
+
+    // NVS'yi aç
+    err = nvs_open("storage", NVS_READONLY, &nvs_handle);
+    if (err == ESP_OK) {
+        // NVS'den port numarasını oku
+        err = nvs_get_i32(nvs_handle, "port_number", &port_number);
+        if (err == ESP_OK) {
+            if (port_number <= 0 || port_number > 65535) {
+                ESP_LOGE(TAG, "NVS'de geçersiz port numarası: %" PRId32 ". Varsayılan port kullanılacak: %d ", port_number, DEFAULT_SERVER_PORT);
+                port_number = DEFAULT_SERVER_PORT;
+            } else {
+                ESP_LOGI(TAG, "NVS'den port numarasi okundu: %" PRId32 "", port_number);
+            }
+        } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGW(TAG, "NVS'de port numarası bulunamadı. Varsayılan port kullanılacak: %d", DEFAULT_SERVER_PORT);
+            port_number = DEFAULT_SERVER_PORT;
+        } else {
+            ESP_LOGE(TAG, "NVS'den port numarası okunurken hata oluştu: %s", esp_err_to_name(err));
+            port_number = DEFAULT_SERVER_PORT;
+        }
+
+        // NVS'den server IP adresini oku
+        err = nvs_get_str(nvs_handle, "server_ip", server_ip, &ip_length);
+        if (err == ESP_OK) {
+            ESP_LOGI(TAG, "NVS'den server IP adresi okundu: %s", server_ip);
+        } else if (err == ESP_ERR_NVS_NOT_FOUND) {
+            ESP_LOGW(TAG, "NVS'de server IP adresi bulunamadı. Varsayılan IP kullanılacak: %s", SERVER_IP);
+        } else {
+            ESP_LOGE(TAG, "NVS'den server IP adresi okunurken hata oluştu: %s", esp_err_to_name(err));
+        }
+
+        nvs_close(nvs_handle);
+    } else {
+        ESP_LOGE(TAG, "NVS acilamadi default tcp basladi: %s", esp_err_to_name(err));
+        
+
+    }
+
+    // Soket oluştur
+    sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "Soket oluşturulamadı");
+        return -1;
+    }
+
+
+
+    // Sunucu adresini yapılandır
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(port_number);
+    server_addr.sin_addr.s_addr = inet_addr(server_ip);
+
+    // Sunucuya bağlan
+    if (connect(sock, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        ESP_LOGE(TAG, "Sunucuya bağlantı başarısız");
+        close(sock);
+        return -1;
+    }
+
+    ESP_LOGI(TAG, "Server Connected, IP: %s, port: %" PRId32 "", server_ip, port_number);
+    return sock;
+}
+
+void tcp_send_data(int sock,  char *datax, int len)
+{	
+     if (send(sock, (uint8_t *)datax, strlen(datax), 0) < 0) {  // Hata durumunda -1 döner
+                ESP_LOGE("APP", "Veri gonderim hatası, yeniden baglanıyor...");
+                close(sock);  // Bağlantı kapatılır
+            }
+}
+
+void tcp_send( char* format, ...) {
+	
+   static char send_data[128];  // Göndermek istediğiniz veriyi tutacak buffer
+   static  va_list args;
+        
+        va_start(args, format);
+        vsnprintf(send_data, sizeof(send_data), format, args);  // Formatlı string oluşturuluyor
+        va_end(args);
+    
+    // tcp üzerinden gönderiliyor
+    tcp_send_data(sock, send_data, strlen(send_data));
+}
+
+void tcp_closex(int sock)
+{
+    close(sock);
+}
+
+
+#define Tcp "TCP_TASK"
+
+void tcp_server_task(void *pvParameters) {
+    int len;
+
+    while (tcpmaincontrol) {
+        // TCP sunucusuna bağlanmayı dene
+        sock = tcp_connectx();
+        if (sock < 0) {
+            ESP_LOGE(Tcp, "Failed to connect to server, will try again in 1 second...");
+            vTaskDelay(1000 / portTICK_PERIOD_MS);  // 1 saniye bekle ve tekrar dene
+            continue;  // Bağlanma başarısız, tekrar denemek için döngü başa döner
+        }
+
+        ESP_LOGI(Tcp, "Server is connected");
+
+        // Sunucuya bağlanma başarılı, veri gönderme döngüsüne başla
+        while (tcpmaincontrol) {
+            // Veri alımını `recv` ile non-blocking yap
+            fd_set readfds;
+            struct timeval timeout;
+            FD_ZERO(&readfds);
+            FD_SET(sock, &readfds);
+
+            timeout.tv_sec = 0;
+            timeout.tv_usec = 1000;  // 100 ms timeout
+
+            int select_ret = select(sock + 1, &readfds, NULL, NULL, &timeout);
+            if (select_ret < 0) {
+                ESP_LOGE(Tcp, "selected error try again...");
+                close(sock);  // Bağlantı kapatılır
+                break;  // Bağlantı kesilince döngüden çık
+            } else if (select_ret == 0) {
+                // Timeout, veri yok, döngüye devam et
+                continue;
+            }
+
+            if (FD_ISSET(sock, &readfds)) {
+                // Veri alımını `recv` ile yap
+                len = recv(sock, rx_buffer, 10240, 0);
+                if (len < 0) {
+                    ESP_LOGE(Tcp, "recv error, trying to reconnect......");
+                    close(sock);  // Bağlantı kapatılır
+                    break;  // Bağlantı kesilince döngüden çık
+                } else if (len == 0) {
+                    ESP_LOGE(Tcp, "Server closed the connection");
+                    close(sock);  // Bağlantı kapatılır
+                    break;  // Bağlantı kapandı, döngüden çık
+                } else {
+                    // Gelen veriyi `rx_buffer`a kaydet, sonuna null ekle
+                    rx_buffer[len] = 0;
+                    ESP_LOGI(Tcp, "Recived data:%d", len);
+                    if (esp_stm_flag == 1) {
+                        binary_esp32(rx_buffer, len);
+                    } else if (esp_stm_flag == 2) {
+                        binary_flashto_stm32(rx_buffer, len);
+                    } else {
+                       // process_command(rx_buffer, len);  // Veriyi ve uzunluğunu doğrudan işle
+                       process_command(rx_buffer,len);
+                    }
+                }
+            }
+        }
+
+        ESP_LOGI(Tcp, "Connection lost, retrying...");
+    }
+    ESP_LOGI(Tcp, "TCP TASK terminated.");
+    tcpoutflag=true;
+    vTaskDelete(NULL);
+}
+
+void binary_esp32(char* byte,uint16_t Size) {
+          
+          
+              if (strncmp(byte, LEN,strlen(LEN)) == 0) {            //ilk dosya boyutunu belirleme 
+		     firmware_size = 0;
+			memcpy(&firmware_size, byte + 4, 4);  
+            firmware_size = ntohl(firmware_size);  // Eğer ağ byte sıralaması (network byte order) gerekiyorsa
+             // Firmware boyutunu yazdırabilir veya kullanabilirsiniz
+              printf("Firmware size:%"PRIu32"\n", firmware_size);
+                
+	      }else { 
+          
+           
+           
+           
+           if (total_data_len == 0) //başlangıçta kontrol flagı boyut üzerinden bakılıyor
+                {
+					
+    
+                    buffer_size = firmware_size+4; //+4 crc den geliyor
+                    
+   
+                     if (ota_partition == NULL) {
+                  // OTA partitionı bulun ve başlat
+                   ota_partition = esp_ota_get_next_update_partition(NULL);
+                   if (ota_partition == NULL) {
+                      ESP_LOGE(TAG, "No OTA partition found");
+                      
+                    }
+  
+                  //OTA BEGİN FONKSİYONU
+                    esp_err_t err = esp_ota_begin(ota_partition, OTA_SIZE_UNKNOWN, &ota_handle);
+                   if (err != ESP_OK) {
+                      ESP_LOGE(TAG, "OTA begin failed: %s", esp_err_to_name(err));
+                     
+                   }
+                  }
+                  
+                
+
+                   
+               }
+          
+          
+          
+            total_data_len += Size; //totalde yazılan değeri bulma
+            float progress = ((float)total_data_len / (float)buffer_size) * 100.0f;
+            ESP_LOGI("WRTE", "Writing Progress: %.2f%%", progress);
+            tcp_send("Writing Progress: %.2f%%\n\r", progress);
+           if(total_data_len < buffer_size){
+			       //ota hafızasına yazma işlemini başlat
+			       esp_err_t err = esp_ota_write(ota_handle, byte, Size);
+                   if (err == ESP_OK) {
+					  ESP_LOGI(TAG, "OTA write SUCCES:");
+                   }else {
+					  ESP_LOGE(TAG, "OTA write error: %s", esp_err_to_name(err));
+                      tcp_send("OTA write error: %s", esp_err_to_name(err)); 
+				   }
+				   
+		            current_crc = calculate_increment_crc32((uint8_t*)byte,Size,current_crc);
+		      }else {
+
+					//ota hafızasına yazma işlemini başlat
+                   esp_err_t err = esp_ota_write(ota_handle, byte, Size-4);
+                   if (err == ESP_OK) {
+					  ESP_LOGI(TAG, "OTA write SUCCES:");
+                   }else {
+					  ESP_LOGE(TAG, "OTA write error: %s", esp_err_to_name(err));
+                      tcp_send("OTA write error: %s", esp_err_to_name(err)); 
+				   }
+				   current_crc = calculate_increment_crc32((uint8_t*)byte, Size-4,current_crc);
+                   Read_CRC = (byte[Size-4] << 24) |
+                   (byte[Size - 3] << 16) |
+                   (byte[Size - 2] << 8) |
+                   (byte[Size - 1 ]);
+                   
+              }
+
+
+                    // Eğer bu paket son paketse (FIN bayrağı set edilmiyor)
+                if (total_data_len == buffer_size)
+              {
+    
+                    ESP_LOGI(TAG, "COMPLETED SUCCESFLY");
+                    
+                    
+                    
+                      // yazma esnasından CRC'yi karşılaştır 
+                  if (current_crc == Read_CRC) {
+                       tcp_send("CRC Verification Successful");
+					   tcp_send("GELEN CRC=%"PRIu32" AlinanCRC=%"PRIu32"",Read_CRC,current_crc);
+                  } else {
+                       tcp_send("CRC Verification FAİLED!!!!");
+					   tcp_send("GELEN CRC=%"PRIu32" AlinanCRC=%"PRIu32"",Read_CRC,current_crc);
+                  }
+                     //yazdıktan sonra tekrar oku ve crc kjarşılaştır
+                     
+                         // OTA bölgesinden blok blok geri okuma ve CRC doğrulaması
+                        uint8_t *rdrbuf = malloc(sizebuf);
+                     if (rdrbuf == NULL) {
+                       ESP_LOGE(TAG, "Memory allocation failed for rdrbuf");
+                        return;  // Bellek ayrılmadıysa fonksiyondan çık
+                               }
+                    
+                      // Tüm veriyi bloklar halinde oku
+                   while (offset < total_data_len-4) {
+                        size_t read_size = (total_data_len-4 - offset > sizebuf) ? sizebuf : (total_data_len-4 - offset);
+                        
+
+                        esp_err_t err = esp_partition_read(ota_partition, offset, rdrbuf, read_size);
+                        if (err == ESP_OK) {
+                        // CRC'yi blok blok hesapla
+                        verify_crc = calculate_increment_crc32(rdrbuf, read_size, verify_crc);
+                        } else {
+                        ESP_LOGE(TAG, "Failed to read OTA partition at offset %d: %s", offset, esp_err_to_name(err));
+                         tcp_send("Error reading OTA partition");
+                                break;
+                        }
+        
+                                offset += read_size;  // Sonraki bloğa geç
+                    }
+                                       
+                  
+                     // Yazıldıktan sonra CRC doğrulaması
+                    if (verify_crc == Read_CRC) {
+						
+                        tcp_send("CRC Verification after writing successful");
+                        
+                        if (ota_partition != NULL) {
+                        // OTA işlemini tamamla
+                        esp_err_t err = esp_ota_end(ota_handle);
+                        if (err != ESP_OK) {
+                                  ESP_LOGE(TAG, "OTA end failed: %s", esp_err_to_name(err));
+                        } else {
+                                  // Yeni partition'u aktive et ve yeniden başlat
+                                  err = esp_ota_set_boot_partition(ota_partition);
+                                  if (err == ESP_OK) {
+								  esprestartflag=true;
+                                  ESP_LOGI(TAG, "OTA update successful...");                        
+                                  } else {
+                                     ESP_LOGE(TAG, "OTA set boot partition failed: %s", esp_err_to_name(err));
+                                  }
+                                
+                              }
+                              
+                               
+                        }
+                        
+                        
+                        
+                        
+                        
+
+                   } else {
+                          tcp_send("CRC Verification after writing FAILED");
+                   }
+ 
+                    free(rdrbuf);
+                    ota_partition=NULL;
+                    buffer_size = 0;
+                    total_data_len = 0;
+                    progress=0;
+                    offset=0;
+                    verify_crc  = 0x00000000;
+                    current_crc = 0x00000000;
+                    esp_stm_flag=0;
+                   
+                    
+               }
+               
+               }
+  
+ 
+}
+
+
+
+
+void binary_flashto_stm32(char* byte,uint16_t Size) {
+	
+
+    
+          if (strncmp(byte, LEN,strlen(LEN)) == 0) {            //ilk dosya boyutunu belirleme 
+		     firmware_size = 0;
+			 memcpy(&firmware_size, byte + 4, 4);  
+             firmware_size = ntohl(firmware_size);  // Eğer ağ byte sıralaması (network byte order) gerekiyorsa
+             // Firmware boyutunu yazdırabilir veya kullanabilirsiniz
+              printf("STM32_Firmware_size:%"PRIu32"\n", firmware_size);
+             stm_ota_flag=true;
+                
+	      }else if(stm_ota_flag)
+	      {
+			  
+			  
+			  if (total_data_stm_len == 0) 
+	              {
+					  
+                      buffer_size = firmware_size + 4; // +4 CRC için
+                          
+                         if (storage_partition == NULL) {
+                             // storage partition'ı bulun
+                                   storage_partition = esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+                                   ESP_PARTITION_SUBTYPE_ANY, "storage");
+                        
+                         if (storage_partition == NULL) {
+                                       ESP_LOGE(TAG, "No storage partition found");
+                                            //kurtarma eklenecek 
+                                             return;
+                                         }
+                            }  
+                            
+                             
+                           esp_err_t ret = esp_partition_erase_range(storage_partition, 0, storage_partition->size);
+                               if (ret == ESP_OK) {
+                                     ESP_LOGI(TAG, "Partition başarıyla silindi.");
+                                   } else {
+                                       ESP_LOGE(TAG, "Partition silme hatası: %s", esp_err_to_name(ret));
+                                          // Hata durumunda gereken işlemleri burada yapabilirsiniz.
+                                   }
+                           
+                           
+                  }
+                 
+                 
+                 
+                   offset_write=total_data_stm_len;
+                   total_data_stm_len += Size; //totalde yazılan değeri bulma
+                 
+                        if(total_data_stm_len < buffer_size){
+					 					 
+					           // Gelen veriyi storage partition'a yazma
+                          esp_err_t err= esp_partition_write(storage_partition,offset_write,byte, Size);
+                          if (err == ESP_OK) {
+                                 ESP_LOGI(TAG, "Write to storage partition successful%d",offset_write);
+                                 
+                         } else {
+                                ESP_LOGE(TAG, "Write to storage partition failed: %s", esp_err_to_name(err));
+                               tcp_send("Write to storage partition failed: %s", esp_err_to_name(err));
+                          }
+				   
+		                 current_crc = calculate_increment_crc32((uint8_t*)byte,Size,current_crc);
+		           }else{
+					   
+					   					           // Gelen veriyi storage partition'a yazma
+                          esp_err_t err = esp_partition_write(storage_partition, offset_write, byte, (Size-4));
+                          
+                          if (err == ESP_OK) {
+                                 ESP_LOGI(TAG, "Write to storage partition successful%d",offset_write); 
+                         } else {
+                                ESP_LOGE(TAG, "Write to storage partition failed: %s", esp_err_to_name(err));
+                               tcp_send("Write to storage partition failed: %s", esp_err_to_name(err));
+                          }
+                          
+                        current_crc = calculate_increment_crc32((uint8_t*)byte, Size-4,current_crc);
+                           Read_CRC = (byte[Size-4] << 24) |
+                           (byte[Size - 3] << 16) |
+                           (byte[Size - 2] << 8) |
+                           (byte[Size - 1 ]);
+					   
+				   }
+				   
+			      if (total_data_stm_len == buffer_size)
+                     {
+    
+                             ESP_LOGI(TAG, "COMPLETED SUCCESFLY");           
+                            // ------------------------------yazma esnasından CRC'yi karşılaştır------------------------------// 
+                           if (current_crc == Read_CRC) {
+                              tcp_send("CRC Verification Successful");
+					          tcp_send("GELEN CRC=%"PRIu32" AlinanCRC=%"PRIu32"",Read_CRC,current_crc);
+					          
+	  
+                           } else {
+                             tcp_send("CRC Verification FAİLED!!!!");
+					         tcp_send("GELEN CRC=%"PRIu32" AlinanCRC=%"PRIu32"",Read_CRC,current_crc);
+                           }
+                           
+                           
+                         uint8_t *rdrbuf = malloc(sizebuf);
+                         if (rdrbuf == NULL) {
+                          ESP_LOGE(TAG, "Memory allocation failed for rdrbuf");
+                            return;  // Bellek ayrılmadıysa fonksiyondan çık
+                               }
+                                                        
+                           
+                           stop_uart_task(); //uart flush tasın içine eklendi
+                           delay_ms(100);
+                           deinit_uartbootloader();      
+                           init_uartbootloader();
+                           delay_ms(500); 
+                           power_reset();
+                           RDP_UnLock();
+                           erase_full();        
+                               
+                    
+                      // Tüm veriyi bloklar halinde oku
+                     while (offset < firmware_size) {
+                        size_t read_size = (firmware_size - offset > sizebuf) ? sizebuf : (firmware_size - offset);
+                        
+
+                        esp_err_t err = esp_partition_read(storage_partition, offset, rdrbuf, read_size);
+                        if (err == ESP_OK) {
+							
+                        verify_crc = calculate_increment_crc32(rdrbuf, read_size, verify_crc);
+                        bool sendf=flash_to_stm32(offset, rdrbuf,read_size);
+                        
+                      if(sendf){
+				          tcp_send("STM32 Flash writing successful ");
+					    }else {
+                           tcp_send("STM32 Flash writing unsuccessful ERROR ");
+                        }
+                        
+                        
+                        
+                                                                 
+                        } else {
+                        ESP_LOGE(TAG, "Failed to read OTA partition at offset %d: %s", offset, esp_err_to_name(err));
+                         tcp_send("Error reading OTA partition");
+                                break;
+                        }
+                        
+                        
+    
+           
+                                offset += read_size;  // Sonraki bloğa geç
+
+                      }
+                                       
+                  
+                     // Yazıldıktan sonra CRC doğrulaması
+                    if (verify_crc == Read_CRC) {
+                        tcp_send("CRC Verification after writing successful");
+					    tcp_send(" Write CRC=%"PRIu32" AlinanCRC=%"PRIu32"",Read_CRC,verify_crc);
+					    //program yazma ok programa geçme donanımsal 
+					    if(RDP_Lock()){   //rdp lock edilmesse sistem çalışmıyor. garipppp
+						   tcp_send("RDP LEVEL SET 1 SUCCESS");
+					     }else{
+						   tcp_send("RDP LEVEL SET 0 ERROR ");
+					     }        
+                          set_boot0_low();          
+		                  power_reset();
+                        
+                   } else {
+                          tcp_send("CRC Verification after writing FAILED");
+                          tcp_send("CRC Verification FAİLED!!!!");
+					      tcp_send("GELEN CRC=%"PRIu32" AlinanCRC=%"PRIu32"",Read_CRC,verify_crc);
+                   }
+                           
+                           
+                        free(rdrbuf);   
+                        rdrbuf=NULL;
+                        buffer_size = 0;
+                        total_data_stm_len = 0;
+                        verify_crc = 0x00000000;
+                        current_crc = 0x00000000;
+                        offset=0;
+                        esp_stm_flag=0;
+                        stm_ota_flag=0;
+                        
+                        //---------------------------uart tası için tekrar init--------------//
+                        deinit_uartbootloader();
+                        init_uart();
+                        start_uart_task();
+                        power_reset();
+                        
+                        
+                        //-------------------------partition silme işlemi.--------------------//
+                        
+                        esp_err_t ret = esp_partition_erase_range(storage_partition, 0, storage_partition->size);
+                               if (ret == ESP_OK) {
+                                    ESP_LOGI(TAG, "Partition erased successfully.");
+                                  } else {
+                                    ESP_LOGE(TAG, "Partition erase error: %s", esp_err_to_name(ret));
+                                  }
+                       
+                         storage_partition=NULL; //partition null yap 
+                         
+                    }
+                   
+			  
+			  
+			  
+			  
+			  
+			  
+			 	  
+			  
+			  
+			  
+		  }else{
+			  
+			  tcp_send("Dosya boyutu alinamadi.");
+			  stm_ota_flag=0;
+			  esp_stm_flag=0;
+			  
+		  }
+		
+	
+}
+
+
+
+
+void binary_stm32(char* byte,uint16_t Size) {
+
+        
+        if (strncmp(byte, LEN,strlen(LEN)) == 0) {            //ilk dosya boyutunu belirleme 
+		     firmware_size = 0;
+			memcpy(&firmware_size, byte + 4, 4);  
+            firmware_size = ntohl(firmware_size);  // Eğer ağ byte sıralaması (network byte order) gerekiyorsa
+             // Firmware boyutunu yazdırabilir veya kullanabilirsiniz
+              printf("Firmware size:%"PRIu32"\n", firmware_size);
+             //  vTaskSuspend(exampleTaskHandle);   
+                
+	      }else {                                            //dosya boyutu ardından binary alma 
+			   
+			  
+                     if (buffer == NULL)
+                 {
+
+                    buffer_size = firmware_size+4; //+4 crc den geliyor
+
+                   // Mevcut RAM miktarını kontrol etme
+                     multi_heap_info_t heap_info;
+                     heap_caps_get_info(&heap_info, MALLOC_CAP_8BIT);
+                     if (heap_info.total_free_bytes < buffer_size)
+                    {
+                       
+                       ESP_LOGE(TAG, "Not enough memory available, total_free_bytes=%d, required=%d", heap_info.total_free_bytes, buffer_size);
+                       
+                       return;
+                    }
+
+                         buffer = (uint8_t *)malloc(buffer_size);
+                    if (buffer == NULL)
+                     {
+                        ESP_LOGE(TAG, "Memory allocation failed");
+                         return;
+                     }
+                         total_data_len = 0;
+                  }
+            
+            
+            
+            
+                   // Gelen veriyi buffer'a kopyala.
+                  memcpy(buffer + total_data_len, byte, Size);
+                  total_data_len += Size;
+                  
+                  
+                                      // Eğer bu paket son paketse (FIN bayrağı set edilmişse)
+                if (total_data_len == buffer_size)
+              {
+
+
+                   
+                    Read_CRC = (buffer[buffer_size-4] << 24) |
+                        (buffer[buffer_size - 3] << 16) |
+                        (buffer[buffer_size - 2] << 8) |
+                        (buffer[buffer_size - 1 ]);
+                        
+                       Buffer_CRC= calculate_crc32(buffer, buffer_size -4);
+                     
+                     if(Read_CRC==Buffer_CRC){
+						  
+					   tcp_send("CRC Verification Successful");
+					   tcp_send("GELEN CRC=%"PRIu32" AlinanCRC=%"PRIu32"",Read_CRC,Buffer_CRC);
+					 }else{
+					   tcp_send("CRC Verification UNSuccessful");
+					   tcp_send("GELEN CRC=%"PRIu32" AlinanCRC=%"PRIu32"",Read_CRC,Buffer_CRC);
+					 }
+					    
+                     
+                           
+                    stop_uart_task();
+                    uart_flush(UART_PORT_NUM); //bufferdaki veriler karışıyor.
+                   
+                    init_uartbootloader();
+                    
+                    delay_ms(500);
+                    RDP_UnLock();
+                                   
+                    bool sendflag=ram_to_stm32(buffer, buffer_size-4);
+                    
+                    if(sendflag){
+				       tcp_send("STM32 Flash writing successful ");
+				       if(RDP_Lock()){
+						   tcp_send("RDP LEVEL SET 1 SUCCESS");
+					   }else{
+						   tcp_send("RDP LEVEL SET 0 ERROR ");
+					   }
+                    ESP_LOGI(TAG, "COMPLETED SUCCESFLY");
+                       //program yazma ok programa geçme donanımsal 
+                            set_boot0_low();          
+		                    power_reset();
+						
+					}else {
+                           tcp_send("STM32 Flash writing unsuccessful ERROR ");
+                    }
+                    
+                        
+
+                    
+                     // İşleme tamamlandığında buffer'ı serbest bırak.
+                    free(buffer);
+                    buffer = NULL;
+                    buffer_size = 0;
+                    total_data_len = 0;
+                    esp_stm_flag=0;
+                    init_uart();
+                    start_uart_task();
+                     xTaskCreate(uart_event_task, "uart_data_event", 10240, NULL, 4, NULL);
+                    
+                 //   vTaskResume(exampleTaskHandle);
+
+                    
+              }
+            		 
+			  
+          }
+  
+ 
+}
+
+
+
+
+
+
+bool flash_to_stm32(uint32_t adress, uint8_t* data, uint32_t total_data_size) {
+	
+   uint32_t remaining_data = total_data_size;
+   uint32_t bytes_written = 0;
+   uint32_t stm32_offset_addr=stm32_offset+adress;
+   
+    
+
+    // Gelen veriyi bloklar halinde yazdır
+    while (remaining_data > 0) {
+        // Bu blokta yazılacak veri boyutunu hesapla
+        uint16_t length_to_write = (remaining_data > BLOCK_SIZE) ? BLOCK_SIZE : remaining_data;
+
+        // STM32'ye blok yazma işlemi
+        if(write_block(stm32_offset_addr, data + bytes_written, length_to_write)){
+			
+			        // Yazılan veri miktarını güncelle
+            bytes_written += length_to_write;
+            remaining_data -= length_to_write;
+
+            // STM32 adresini bir sonraki bloğa güncelle
+            stm32_offset_addr += length_to_write;
+            
+                              // Yüzde hesaplama
+             float progress = ((float)(bytes_written + adress) / (float)firmware_size) * 100.0f;
+              ESP_LOGI("WRTE", "Writing Progress: %.2f%%", progress);
+             tcp_send("Writing Progress: %.2f%%\n\r", progress);
+
+            
+		}else {
+             ESP_LOGE("WRTE", "ERROR");
+             return false;
+             break;
+        }
+
+
+    }
+    return true;
+
+}
+
+
+
+
+bool ram_to_stm32(uint8_t* data, uint32_t total_data_size) {
+	
+   uint32_t remaining_data = total_data_size;
+   uint32_t bytes_written = 0;
+   uint32_t stm32_offset_addr=stm32_offset;
+   
+    
+
+    // Gelen veriyi bloklar halinde yazdır
+    while (remaining_data > 0) {
+        // Bu blokta yazılacak veri boyutunu hesapla
+        uint16_t length_to_write = (remaining_data > BLOCK_SIZE) ? BLOCK_SIZE : remaining_data;
+
+        // STM32'ye blok yazma işlemi
+        if(write_block(stm32_offset_addr, data + bytes_written, length_to_write)){
+			
+			        // Yazılan veri miktarını güncelle
+            bytes_written += length_to_write;
+            remaining_data -= length_to_write;
+
+            // STM32 adresini bir sonraki bloğa güncelle
+            stm32_offset_addr += length_to_write;
+            
+             // Yüzde hesaplama
+            float progress = ((float)bytes_written / (float)firmware_size) * 100.0f;
+            ESP_LOGI("WRTE", "Writing Progress: %.2f%%", progress);
+            tcp_send("Writing Progress: %.2f%%", progress);
+            
+		}else {
+             ESP_LOGE("WRTE", "ERROR");
+             return false;
+             break;
+        }
+
+
+    }
+    return true;
+
+}
+
+uint32_t calculate_crc32(uint8_t *buffer, size_t length) {
+    // CRC'yi başlat
+    uint32_t crc = 0x00000000;  // CRC'yi başlatma değeri
+
+    // CRC hesaplamasını gerçekleştir
+    crc = esp_crc32_le(crc, buffer, length);
+    return crc;
+}
+
+
+uint32_t calculate_increment_crc32(uint8_t *buffer, size_t length, uint32_t crcx) {
+    uint32_t crc=0;
+    crc = esp_crc32_le(crcx, buffer, length);
+    return crc;
+}
+

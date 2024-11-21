@@ -1,0 +1,152 @@
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+#include "Bootloader.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+#include "freertos/semphr.h"
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "esp_event.h"
+#include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_http_client.h"
+#include "esp_https_ota.h"
+#include "lwip/err.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+#include "cJSON.h"
+#include "esp_tls.h"
+#include "esp_crt_bundle.h"
+
+#define FIRMWARE_URL        "https://raw.githubusercontent.com/ahmetnsahi/workspace/main/ESP_STM32_OTA/build/app-template.bin"
+static const char *TAG = "HTTPS_OTA";
+
+extern const char server_cert_pem_start[] asm("_binary_ca_cert_pem_start");
+extern const char server_cert_pem_end[] asm("_binary_ca_cert_pem_end");
+// Global değişkenler
+static volatile bool update_flag = false;
+static SemaphoreHandle_t update_mutex = NULL;
+
+
+// Dosyayı kaydetmek için buffer
+
+static int output_len = 0;
+static int total_read = 0;
+#define MAX_BUFFER_SIZE 1024
+static esp_ota_handle_t ota_handle = 0;
+static const esp_partition_t *update_partition = NULL;
+// Binary dosyayı hafızada tutacak global değişken
+// HTTP event handler
+
+#define TAG "HTTP_CLIENT"
+
+// Buffer size
+#define BUFFER_SIZE 4096
+
+
+
+void download_binary_file(const char *url) {
+	
+esp_http_client_config_t config = {
+    .url = url,
+    .timeout_ms = 5000,
+    .cert_pem = server_cert_pem_start,
+    .cert_len = server_cert_pem_end - server_cert_pem_start,
+    .user_agent = "eps32",
+    .keep_alive_enable = true,
+    .buffer_size = 4096,
+    .buffer_size_tx = 4096,
+    .transport_type = HTTP_TRANSPORT_OVER_SSL,
+
+};
+
+   uint32_t free_heap_size=0, min_free_heap_size=0;
+    free_heap_size = esp_get_free_heap_size();
+    min_free_heap_size = esp_get_minimum_free_heap_size(); 
+    printf("\n free heap size = %" PRIu32 " \t  min_free_heap_size = %" PRIu32 "\n",free_heap_size,min_free_heap_size); 
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        ESP_LOGE(TAG, "HTTP client initialization failed");
+        return;
+    }
+
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        return;
+    }
+
+    int content_length = esp_http_client_fetch_headers(client);
+    if (content_length < 0) {
+        ESP_LOGE(TAG, "HTTP fetch headers failed");
+    } else {
+        ESP_LOGI(TAG, "Content length: %d", content_length);
+    }
+
+    uint8_t *buffer = malloc(BUFFER_SIZE);
+    if (buffer == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for download buffer");
+        esp_http_client_close(client);
+        esp_http_client_cleanup(client);
+        return;
+    }
+
+    int total_read_len = 0;
+    int read_len;
+    while ((read_len = esp_http_client_read(client, (char *)buffer, BUFFER_SIZE)) > 0) {
+        total_read_len += read_len;
+        ESP_LOGI(TAG, "Read %d bytes", read_len);
+
+        // Burada indirdiğiniz veriyi işleyebilirsiniz
+        // Örneğin: SPI flash'a yazmak, bir dosyaya kaydetmek vb.
+
+        // Örnek olarak: fwrite() veya esp_partition_write() gibi bir işlem yapabilirsiniz.
+    }
+
+    if (read_len < 0) {
+        ESP_LOGE(TAG, "Error reading data: %s", esp_err_to_name(read_len));
+    }
+
+    ESP_LOGI(TAG, "Total read length: %d", total_read_len);
+
+    free(buffer);
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+}
+
+
+
+void check_update_task(void *pvParameter)
+{
+    update_mutex = xSemaphoreCreateMutex();
+    if (!update_mutex) {
+        ESP_LOGE(TAG, "Failed to create mutex");
+        return;
+    }
+
+    while (1) {
+        if (update_flag) {
+            if (xSemaphoreTake(update_mutex, portMAX_DELAY) == pdTRUE) {
+                update_flag = false;
+                download_binary_file(FIRMWARE_URL);
+                xSemaphoreGive(update_mutex);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+// OTA güncellemeyi başlat (dışarıdan çağrılabilir)
+void start_ota_update(void)
+{
+    if (update_mutex != NULL) {
+        if (xSemaphoreTake(update_mutex, portMAX_DELAY) == pdTRUE) {
+            update_flag = true;
+            xSemaphoreGive(update_mutex);
+        }
+    }
+}

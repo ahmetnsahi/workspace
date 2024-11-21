@@ -1,0 +1,263 @@
+#include <string.h>
+#include <stdlib.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "esp_event.h"
+#include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_http_client.h"
+#include "esp_https_ota.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+#include "cJSON.h"
+#include "mbedtls/base64.h"
+
+#define FIRMWARE_VERSION    "v1.0.0"
+#define UPDATE_JSON_URL     "https://api.github.com/repos/USERNAME/REPO/contents/version.json"
+#define FIRMWARE_URL        "https://raw.githubusercontent.com/ahmetnsahi/workspace/refs/heads/main/ESP_STM32_OTA/build/app-template.bin"
+#define GITHUB_TOKEN        "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"
+
+static const char *TAG = "HTTPS_OTA";
+// Define maximum buffer size
+#define MAX_HTTP_OUTPUT_BUFFER 2048
+
+// Define a structure to hold the response data
+typedef struct {
+    char *buffer;
+    int buffer_len;
+} http_response_t;
+
+// Declare the update flag
+volatile int update_flag = 0; // This flag will be set to 1 via Bluetooth from another file
+
+// Function to remove newlines from a string
+char *remove_newlines(const char *str) {
+    size_t len = strlen(str);
+    char *result = malloc(len + 1); // Allocate memory
+    if (result == NULL) {
+        ESP_LOGE(TAG, "Failed to allocate memory for removing newlines");
+        return NULL;
+    }
+    char *p = result;
+    while (*str) {
+        if (*str != '\n' && *str != '\r') {
+            *p++ = *str;
+        }
+        str++;
+    }
+    *p = '\0';
+    return result;
+}
+
+// HTTP Client event handler
+esp_err_t _http_event_handler(esp_http_client_event_t *evt)
+{
+    http_response_t *resp = (http_response_t *)evt->user_data;
+
+    switch(evt->event_id) {
+        case HTTP_EVENT_ERROR:
+            ESP_LOGI(TAG, "HTTP_EVENT_ERROR");
+            break;
+        case HTTP_EVENT_ON_CONNECTED:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED");
+            break;
+        case HTTP_EVENT_HEADER_SENT:
+            ESP_LOGI(TAG, "HTTP_EVENT_HEADER_SENT");
+            break;
+        case HTTP_EVENT_ON_HEADER:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_HEADER");
+            break;
+        case HTTP_EVENT_ON_DATA: {
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
+            // Accumulate response data
+            if (!esp_http_client_is_chunked_response(evt->client)) {
+                if (resp->buffer == NULL) {
+                    resp->buffer = (char *) malloc(MAX_HTTP_OUTPUT_BUFFER);
+                    resp->buffer_len = 0;
+                    if (resp->buffer == NULL) {
+                        ESP_LOGE(TAG, "Failed to allocate memory for output buffer");
+                        return ESP_FAIL;
+                    }
+                }
+                if (resp->buffer_len + evt->data_len < MAX_HTTP_OUTPUT_BUFFER) {
+                    memcpy(resp->buffer + resp->buffer_len, evt->data, evt->data_len);
+                    resp->buffer_len += evt->data_len;
+                } else {
+                    ESP_LOGE(TAG, "Not enough memory for output buffer");
+                    return ESP_FAIL;
+                }
+            }
+            break;
+        }
+        case HTTP_EVENT_ON_FINISH:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH");
+            break;
+        case HTTP_EVENT_DISCONNECTED:
+            ESP_LOGI(TAG, "HTTP_EVENT_DISCONNECTED");
+            break;
+        case HTTP_EVENT_REDIRECT:
+            ESP_LOGI(TAG, "HTTP_EVENT_REDIRECT");
+            break;
+    }
+    return ESP_OK;
+}
+
+// OTA update task
+static void check_update_task(void *pvParameter)
+{
+    while (1) {
+        // Wait until the update_flag is set to 1
+        if (update_flag == 1) {
+            ESP_LOGI(TAG, "Update flag set. Checking for firmware updates...");
+            
+            // Reset the flag
+            update_flag = 0;
+
+            // Wait for WiFi connection
+            xEventGroupWaitBits(wifi_event_group, CONNECTED_BIT, false, true, portMAX_DELAY);
+
+            // The rest of the OTA update code remains the same
+            esp_http_client_config_t config = {
+                .url = UPDATE_JSON_URL,
+                .event_handler = _http_event_handler,
+                .cert_pem = NULL,
+                .skip_cert_common_name_check = true,
+            };
+
+            esp_http_client_handle_t client = esp_http_client_init(&config);
+
+            // Add GitHub token and User-Agent
+            esp_http_client_set_header(client, "Authorization", "token " GITHUB_TOKEN);
+            esp_http_client_set_header(client, "User-Agent", "esp32");
+
+            // Initialize response structure
+            http_response_t http_response = {0};
+            esp_http_client_set_user_data(client, &http_response);
+
+            esp_err_t err = esp_http_client_perform(client);
+            if (err == ESP_OK) {
+                int status_code = esp_http_client_get_status_code(client);
+                if (status_code == 200) {
+                    // Null-terminate the buffer
+                    if (http_response.buffer_len < MAX_HTTP_OUTPUT_BUFFER) {
+                        http_response.buffer[http_response.buffer_len] = '\0';
+                    } else {
+                        http_response.buffer[MAX_HTTP_OUTPUT_BUFFER - 1] = '\0';
+                    }
+
+                    // Parse JSON
+                    cJSON *json = cJSON_Parse(http_response.buffer);
+                    if (json == NULL) {
+                        ESP_LOGE(TAG, "Failed to parse JSON");
+                    } else {
+                        cJSON *content_item = cJSON_GetObjectItem(json, "content");
+                        if (content_item == NULL) {
+                            ESP_LOGE(TAG, "No 'content' field in JSON");
+                        } else {
+                            char *content_base64 = content_item->valuestring;
+                            // Remove newlines from base64 string
+                            char *content_base64_clean = remove_newlines(content_base64);
+                            if (content_base64_clean == NULL) {
+                                ESP_LOGE(TAG, "Failed to clean base64 content");
+                            } else {
+                                // Base64 decode
+                                size_t decoded_len = 0;
+                                unsigned char *decoded_content = NULL;
+                                esp_err_t ret = mbedtls_base64_decode(NULL, 0, &decoded_len, (const unsigned char *) content_base64_clean, strlen(content_base64_clean));
+                                if (ret == MBEDTLS_ERR_BASE64_BUFFER_TOO_SMALL) {
+                                    decoded_content = malloc(decoded_len + 1);
+                                    if (decoded_content == NULL) {
+                                        ESP_LOGE(TAG, "Failed to allocate memory for decoded content");
+                                    } else {
+                                        ret = mbedtls_base64_decode(decoded_content, decoded_len, &decoded_len, (const unsigned char *) content_base64_clean, strlen(content_base64_clean));
+                                        if (ret == 0) {
+                                            decoded_content[decoded_len] = '\0'; // Null-terminate
+                                            // Parse decoded JSON
+                                            cJSON *version_json = cJSON_Parse((char *) decoded_content);
+                                            if (version_json == NULL) {
+                                                ESP_LOGE(TAG, "Failed to parse version JSON");
+                                            } else {
+                                                cJSON *version_item = cJSON_GetObjectItem(version_json, "version");
+                                                if (version_item == NULL) {
+                                                    ESP_LOGE(TAG, "No 'version' field in version JSON");
+                                                } else {
+                                                    char *new_version = version_item->valuestring;
+                                                    ESP_LOGI(TAG, "Current firmware version: %s, Available firmware version: %s", FIRMWARE_VERSION, new_version);
+                                                    // Compare versions
+                                                    if (strcmp(new_version, FIRMWARE_VERSION) != 0) {
+                                                        ESP_LOGI(TAG, "New firmware available, starting OTA update");
+                                                        
+                                                        esp_http_client_config_t ota_client_config = {
+                                                            .url = FIRMWARE_URL,
+                                                            .cert_pem = NULL,
+                                                            .event_handler = NULL,
+                                                            .skip_cert_common_name_check = true,
+                                                        };
+                                                        
+                                                        esp_https_ota_config_t ota_config = {
+                                                            .http_config = &ota_client_config,
+                                                        };
+                                                        
+                                                        esp_err_t ota_result = esp_https_ota(&ota_config);
+                                                        if (ota_result == ESP_OK) {
+                                                            ESP_LOGI(TAG, "OTA update successful! Rebooting...");
+                                                            esp_restart();
+                                                        } else {
+                                                            ESP_LOGE(TAG, "OTA update failed!");
+                                                        }
+                                                    } else {
+                                                        ESP_LOGI(TAG, "Firmware is up to date");
+                                                    }
+                                                }
+                                                cJSON_Delete(version_json);
+                                            }
+                                        } else {
+                                            ESP_LOGE(TAG, "Failed to decode base64 content");
+                                        }
+                                        free(decoded_content);
+                                    }
+                                } else {
+                                    ESP_LOGE(TAG, "Failed to get decoded length for base64 content");
+                                }
+                                free(content_base64_clean);
+                            }
+                        }
+                        cJSON_Delete(json);
+                    }
+                } else {
+                    ESP_LOGE(TAG, "Failed to download version.json, HTTP status code: %d", status_code);
+                }
+            } else {
+                ESP_LOGE(TAG, "HTTP request failed: %s", esp_err_to_name(err));
+            }
+            if (http_response.buffer != NULL) {
+                free(http_response.buffer);
+            }
+            esp_http_client_cleanup(client);
+        }
+        // Yield to other tasks
+        vTaskDelay(100 / portTICK_PERIOD_MS); // Delay for 100 ms
+    }
+}
+
+// WiFi event handler and initialization functions remain unchanged
+// ...
+
+void app_main(void)
+{
+    // Initialize NVS
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+    
+    // Initialize WiFi
+    wifi_init();
+    
+    // Start OTA update task
+    xTaskCreate(&check_update_task, "check_update_task", 8192, NULL, 5, NULL);
+}

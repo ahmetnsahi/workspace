@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<session version="1.0">
+<refactoring comment="Rename resource &apos;ESP_STM32_OTA/main/certs&apos; to &apos;server_certs&apos;" description="Rename resource &apos;certs&apos;" flags="7" id="org.eclipse.ltk.core.refactoring.rename.resource" input="main/certs" name="server_certs" stamp="1732169899687" updateReferences="true"/>
+</session>

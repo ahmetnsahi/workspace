@@ -1,0 +1,238 @@
+/*
+ * wifi.c
+ *
+ *  Created on: 25 Tem 2024
+ *      Author: ahmet
+ */
+
+#include "wifi.h"
+#include "esp_wifi_types.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "esp_event.h"
+#include "esp_log.h"
+#include "nvs_flash.h"
+#include "esp_netif.h"
+#include "main.h"
+#include <string.h>
+
+#define DEFAULT_WIFI_SSID     "AET_TASARIM"     //"AET_TASARIM"                     
+#define DEFAULT_WIFI_PASS     "Aet515237"           //"Aet515237"               
+#define EXAMPLE_ESP_MAXIMUM_RETRY  10
+
+static EventGroupHandle_t s_wifi_event_group;
+#define MAX_WIFI_RETRY 3
+
+#define WIFI_CONNECTED_BIT BIT0
+#define WIFI_FAIL_BIT      BIT1
+
+static const char *TAG = "wifi station";
+
+static int s_retry_num = 0;
+static esp_netif_t *wifi_sta_netif = NULL; // Netif arayüzünü global değişken olarak tanımlıyoruz
+volatile bool stop_events = false; // Başlangıçta etkin
+
+// Wi-Fi etkinlik işlemcisi
+static void event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data)
+{
+	if (stop_events) {
+        ESP_LOGI(TAG, "Olay isleyici  durduruldu.");
+        return; // Eğer durdurulmuşsa işlem yapmadan çıkar
+    }
+    
+    if (event_base == WIFI_EVENT) {
+        switch(event_id) {
+            case WIFI_EVENT_STA_START:
+            s_retry_num=0;
+              
+                esp_wifi_connect();
+
+                break;
+              case WIFI_EVENT_STA_CONNECTED:
+                 s_retry_num=0;      
+                break;
+                
+            case WIFI_EVENT_STA_DISCONNECTED:
+                    while(!stop_all_task());
+                    esp_wifi_connect();
+                    s_retry_num++;
+                    ESP_LOGI(TAG, "Wi-Fi baglantisi yeniden deneniyor. Deneme sayisi= %d)", s_retry_num );
+                    wifi_config_t current_config;
+                    esp_wifi_get_config(WIFI_IF_STA, &current_config);
+                    ESP_LOGI(TAG, "Wi-Fi baglantisi deneniyor: SSID=\"%s\", PASSWORD=\"%s\"", current_config.sta.ssid, current_config.sta.password);
+                    
+                break;
+                
+                
+                
+            default:
+                break;
+        }
+        
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        ESP_LOGI(TAG, "IP connected: " IPSTR, IP2STR(&event->ip_info.ip));
+        s_retry_num = 0;
+       start_all_task();
+
+        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
+        
+    
+    }
+}
+
+// Wi-Fi başlatma fonksiyonu
+void wifi_init_sta(void)
+{
+    s_wifi_event_group = xEventGroupCreate();
+
+    // Sadece bir kez başlatılmalı
+    ESP_ERROR_CHECK(esp_netif_init());
+
+    // Olay döngüsünü sadece bir kez başlatmalıyız
+    static bool event_loop_created = false;
+    if (!event_loop_created) {
+        ESP_ERROR_CHECK(esp_event_loop_create_default());
+        event_loop_created = true;
+    }
+
+    if (wifi_sta_netif == NULL) {
+        wifi_sta_netif = esp_netif_create_default_wifi_sta();
+        assert(wifi_sta_netif);
+    }
+    
+    
+      esp_netif_set_hostname(wifi_sta_netif, "AETRTLS");
+       
+             
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    // Etkinlik döngüsüne kayıt ol
+    ESP_ERROR_CHECK(esp_event_handler_register(WIFI_EVENT,
+                                               ESP_EVENT_ANY_ID,
+                                               &event_handler,
+                                               NULL));
+    ESP_ERROR_CHECK(esp_event_handler_register(IP_EVENT,
+                                               IP_EVENT_STA_GOT_IP,
+                                               &event_handler,
+                                               NULL));
+
+    wifi_config_t wifi_config = {
+        .sta = {
+            // Başlangıçta boş SSID ve şifre
+            .ssid = "",
+            .password = "",
+        },
+    };
+
+    // NVS'den Wi-Fi bilgilerini oku (daha önce kaydedildiyse)
+    size_t ssid_len = sizeof(wifi_config.sta.ssid);        //önce max uzunluklara göre boyut belirleniyor eğer küçükse aşagıdaki okumada sıkıntı çıkmıyor.
+    size_t pass_len = sizeof(wifi_config.sta.password);
+    nvs_handle_t nvs_handle;
+    esp_err_t err = nvs_open("storage", NVS_READONLY, &nvs_handle);
+    bool wifi_credentials_available = false;
+    if (err == ESP_OK) {
+        if (nvs_get_str(nvs_handle, "wifi_ssid", (char*)wifi_config.sta.ssid, &ssid_len) == ESP_OK &&
+            nvs_get_str(nvs_handle, "wifi_pass", (char*)wifi_config.sta.password, &pass_len) == ESP_OK) {
+            wifi_credentials_available = true;
+        }
+        nvs_close(nvs_handle);
+    }
+
+    if (!wifi_credentials_available) {
+        ESP_LOGI(TAG, "Wi-Fi bilgileri bulunumadi.");
+         memcpy(wifi_config.sta.ssid, DEFAULT_WIFI_SSID, sizeof(wifi_config.sta.ssid));
+         memcpy(wifi_config.sta.password, DEFAULT_WIFI_PASS, sizeof(wifi_config.sta.password));
+    }else {
+        ESP_LOGI(TAG, "Wi-Fi bilgileri NVSden okundu.");
+    }
+    ESP_LOGI(TAG, "Wi-Fi Baglantisi Deneniyor: SSID=\"%s\", Şifre=\"%s\"", wifi_config.sta.ssid, wifi_config.sta.password);
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+  
+     
+  
+      
+   
+}
+
+
+void wifi_deinit_sta(void)
+{
+  ESP_LOGI(TAG, "WiFi kapatiliyor...");
+
+    // 1. WiFi bağlantısını kes
+    esp_err_t err = esp_wifi_disconnect();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "WiFi baglanti kesme hatasi: %s", esp_err_to_name(err));
+    }
+
+    // 2. WiFi'yi durdur
+    err = esp_wifi_stop();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "WiFi durdurma hatasi: %s", esp_err_to_name(err));
+    }
+
+    // 3. Event handler'ları kaldır
+    err = esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "WIFI_EVENT handler kaldirma hatasi: %s", esp_err_to_name(err));
+    }
+
+    err = esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "IP_EVENT handler kaldirma hatasi: %s", esp_err_to_name(err));
+    }
+
+    // 4. WiFi'yi deinitialize et
+    err = esp_wifi_deinit();
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "WiFi deinit hatasi: %s", esp_err_to_name(err));
+    }
+
+    // 5. Netif'i temizle (eğer kullanılmıyorsa)
+    if (wifi_sta_netif != NULL) {
+        esp_netif_destroy(wifi_sta_netif);
+        wifi_sta_netif = NULL;
+    }
+
+    // 6. Event group'u sil
+    if (s_wifi_event_group != NULL) {
+        vEventGroupDelete(s_wifi_event_group);
+        s_wifi_event_group = NULL;
+    }
+
+    ESP_LOGI(TAG, "WiFi basariyla kapatildi");
+}
+
+
+void wifi_restart()
+{
+    ESP_LOGI(TAG, "Wi-Fi yeniden baslatiliyor...");
+
+    // Wi-Fi'yi durdur ve devre dışı bırak
+    ESP_ERROR_CHECK(esp_wifi_stop());
+    ESP_ERROR_CHECK(esp_wifi_deinit());
+
+    // Olay işleyicilerini kaldır
+    ESP_ERROR_CHECK(esp_event_handler_unregister(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler));
+    ESP_ERROR_CHECK(esp_event_handler_unregister(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler));
+
+    // Netif arayüzünü yok et
+    if (wifi_sta_netif) {
+        esp_netif_destroy(wifi_sta_netif);
+        wifi_sta_netif = NULL;
+    }
+
+    // Olay grubundaki bitleri sıfırla
+    xEventGroupClearBits(s_wifi_event_group, WIFI_CONNECTED_BIT | WIFI_FAIL_BIT);
+
+    // Wi-Fi'yi tekrar başlat
+    wifi_init_sta();
+}

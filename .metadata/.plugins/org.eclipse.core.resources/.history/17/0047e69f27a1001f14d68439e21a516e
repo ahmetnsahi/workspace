@@ -1,0 +1,542 @@
+/*
+ * Bootloader.c
+ *
+ *  Created on: 14 Ağu 2024
+ *      Author: ahmet
+ */
+
+#include <stdint.h>
+#include  <stdio.h> 
+#include <stdbool.h>
+#include "arch/sys_arch.h"
+#include <driver/gpio.h>
+#include <stdlib.h>
+#include <string.h>
+#include "driver/uart.h"
+#include "esp_log.h"
+#include "Bootloader.h"
+#include "hal/gpio_types.h"
+#include "hal/uart_ll.h"
+#include "soc/clk_tree_defs.h"
+#include "uartread.h"
+#include "main.h"
+
+static  uint8_t ackread=0;
+static uint8_t length = 0;
+uint8_t bootstr = 0x7F;
+// buffer ve buffer_size global olarak tanımlanır.
+static uint8_t output_buffer[256];
+
+void delay_ms(uint32_t time){
+ vTaskDelay(pdMS_TO_TICKS(time)); // 10ms bekle
+}
+
+
+void init_gpiobootlader() {
+    gpio_set_direction(BOOT_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_direction(RESET_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_direction(POWER_PIN, GPIO_MODE_OUTPUT);
+    gpio_set_pull_mode( POWER_PIN, GPIO_PULLUP_ENABLE);
+    gpio_set_pull_mode( RESET_PIN, GPIO_PULLUP_ENABLE);
+    gpio_set_pull_mode( BOOT_PIN, GPIO_PULLDOWN_ENABLE);
+    // Başlangıçta pinleri güvenli bir duruma getirelim
+    gpio_set_level(BOOT_PIN, 0);
+    gpio_set_level(RESET_PIN, 1);
+    gpio_set_level(POWER_PIN, 1);
+}
+
+void init_uartbootloader() {
+    const uart_config_t uart_config = {
+        .baud_rate = UART_BAUD_RATE,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_EVEN,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE
+        
+};
+       // UART ayarlarını uygula
+    uart_param_config(UART_PORT_NUM, &uart_config);
+    uart_set_pin(UART_PORT_NUM, UART_TX_PIN, UART_RX_PIN, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    uart_driver_install(UART_PORT_NUM, UART_BUFFER_SIZE, UART_BUFFER_SIZE, 0, NULL, 0);
+   
+}
+
+
+void deinit_uartbootloader() {
+    // UART sürücüsünü kaldır ve kaynakları serbest bırak
+    esp_err_t err = uart_driver_delete(UART_PORT_NUM);
+    if (err != ESP_OK) {
+
+        return;
+    }
+    
+    // UART pinlerini varsayılan duruma getir
+    err = uart_set_pin(UART_PORT_NUM, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE, 
+                       UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    if (err != ESP_OK) {
+
+        return;
+    }
+
+
+}
+void init_bootloader(){
+	init_gpiobootlader();
+	init_uart();
+}
+
+void powerOn() {	
+    gpio_set_level(POWER_PIN, 1); 
+}
+
+void powerOf() {
+    gpio_set_level(POWER_PIN, 0); 
+}
+
+void power_reset() {
+    powerOf();
+    delay_ms(100);
+    powerOn();  
+}
+
+void set_boot0_high() {
+    gpio_set_level(BOOT_PIN, 1);   
+}
+
+void set_boot0_low() {
+    gpio_set_level(BOOT_PIN, 0); 
+}
+
+
+
+void reset_stm32() {
+    gpio_set_level(RESET_PIN, 0);
+    delay_ms(30);    // 30ok  25yok
+    gpio_set_level(RESET_PIN, 1);
+    delay_ms(30);   // 30ok  25yok
+}
+
+
+void enter_bootloader_mode() {
+    set_boot0_high();
+    reset_stm32();
+    
+}
+
+void exit_bootloader_mode() {
+    set_boot0_low();
+    reset_stm32();
+}
+
+uint8_t calculate_checksum(uint8_t N, uint8_t *data, uint32_t length) {
+    uint8_t checksum = N;  // Başlangıçta N değeri ile başla
+    
+    // Tüm veri byte'larını XOR'la
+    for (uint32_t i = 0; i < length; i++) {
+        checksum ^= data[i];
+    }
+    
+    return checksum;
+}
+
+	
+bool ack_control() {
+	
+	
+	ackread=0;
+	length = uart_read_bytes(UART_PORT_NUM, &ackread, 1, 1000 / portTICK_PERIOD_MS);
+	 
+	  if (length == 1) {
+        ESP_LOGI("bootloaderack", "Alinan message: 0x%02X", ackread);
+        if (ackread == 0x79) {
+                ESP_LOGI("bootack", "ACK OK");
+                return true;
+         } else {
+                ESP_LOGE("bootack", " NACK ERROR: 0x%02X", ackread);
+                return false;
+            }
+        } else {
+                 ESP_LOGE("bootack", "NACK OR ACK NOT RECIVED");
+                return false;
+        }
+	
+ }   
+ 
+bool connectted_boot(){
+	      enter_bootloader_mode();
+	      uart_flush(UART_PORT_NUM);     // büyük boyutlu dosyalarda uartttan gereksiz veri geliyor bootladerb saçmalıyor verileri otayı bozuyor bunu yapmalısın .
+          uart_write_bytes(UART_PORT_NUM, &bootstr,1);
+          if(ack_control()){
+			  return true;
+		  }else{
+			  return false;
+		  }                    
+}
+
+bool erase_full(){
+
+	 uint8_t ersbytes[2]={0x44,~0x44};
+	 uint8_t ersxbytes[2]={0xFF,0xFF};
+	 uint8_t chkc=0x00;
+	        if(connectted_boot())
+    { 	
+			 ESP_LOGI("clrfunlck", "Bootloader conneted");
+			 uart_write_bytes(UART_PORT_NUM, &ersbytes,2);	 
+		if(ack_control()){
+			
+			 uart_write_bytes(UART_PORT_NUM, &ersxbytes,2);
+			 uart_write_bytes(UART_PORT_NUM, &chkc,1);	
+              if (ack_control()) {
+				  return true;
+				  ESP_LOGI("clrfunlck", "FULL ERASE SUCCESSFUL");
+				
+			  }else{
+				  return false;
+				  ESP_LOGE("clrfunlck", "2. ACK ERROR");
+			  }
+				 
+				 
+		    }else{
+			  ESP_LOGE("clrfunlck", "1. ACK ERROR");
+			  return false;
+		     }
+		
+		
+	}else {
+		  ESP_LOGE("clrfunlck", "Bootloader not conneted");
+          return false;
+    }
+	
+	
+	
+}
+
+ReadResult read_data(uint32_t addres, uint16_t length) {
+	
+	 ReadResult result;
+    result.data = NULL;
+    result.length =length;
+    result.status = 0;
+
+    // Bellek ayırma
+    result.data = (uint8_t*)malloc(length);
+    if (result.data == NULL) {
+        result.status = -1; // Bellek ayırma hatası
+        return result;
+    }
+
+    // Veri okuma algoritması burada uygulanacak
+     uint8_t readbytes[2]={0x11,~0x11};
+
+	        if(connectted_boot())
+      { 	
+			 ESP_LOGI("readfunc", "Bootloader conneted");
+			 uart_write_bytes(UART_PORT_NUM, &readbytes,2);	 
+		     if(ack_control()){
+			      uint8_t addr_bytes[4];
+                  addr_bytes[0] = (addres >> 24) & 0xFF;  // MSB (Byte 3)
+                  addr_bytes[1] = (addres >> 16) & 0xFF;  // Byte 4
+                  addr_bytes[2] = (addres >> 8) & 0xFF;   // Byte 5
+                  addr_bytes[3] = addres & 0xFF;          // LSB (Byte 6)
+          
+                 // Adres baytlarını gönder
+                 uart_write_bytes(UART_PORT_NUM, &addr_bytes, 4);
+                 // Sağlama toplamını (checksum) hesapla ve gönder
+                 uint8_t checksum = addr_bytes[0] ^ addr_bytes[1] ^ addr_bytes[2] ^ addr_bytes[3];
+                 uart_write_bytes(UART_PORT_NUM, &checksum, 1);
+			   	 
+                       if (ack_control())   {
+                               ESP_LOGI("readfunc", "adres ack ok");
+                               //veri boyutunu gönder 
+                          uint8_t lent=length-1;
+                          uint8_t lentcrc=~lent;
+                          uart_write_bytes(UART_PORT_NUM, &lent, 1);
+                          uart_write_bytes(UART_PORT_NUM, &lentcrc, 1);
+                         
+
+                                   if (ack_control()) {
+									   
+								uint8_t	lengthread=0;   
+					            lengthread = uart_read_bytes(UART_PORT_NUM, result.data, length, 1000 / portTICK_PERIOD_MS);
+			 	                  if(lengthread>0){
+									 
+									 result.status= true;
+					                 ESP_LOGI("readfunc", "READ SUCCESSFUL");
+				                  }else{
+					                 ESP_LOGE("readfunc", "2.BOYUT OKUNMADI");
+					                 result.status= false;
+				                  }
+					                         
+					 
+					 
+				                          }else {
+                                             ESP_LOGE("readfunc", "3. ACK ERROR READ");
+					                        result.status= false;
+                                              
+                                           }
+                   
+                   
+			        }else{
+			                     ESP_LOGE("readfunc", "2. ACK ERROR ADRESS");
+			                     result.status = false;
+		                                   }
+		
+				 
+		    }else{
+			  ESP_LOGE("readfunc", "1. ACK ERROR");
+			  result.status = false;
+		     }
+		
+		
+	  }else {
+		  ESP_LOGE("readfunc", "Bootloader not conneted");
+          result.status = false;
+      }
+
+
+    // Örnek: Okunan veri miktarını varsayalım
+    result.length = length;
+
+    // Okuma başarılı olduysa status 0 kalır
+    // Hata durumunda status değeri değiştirilebilir
+
+    return result;
+	
+}
+
+bool write_block(uint32_t addres, uint8_t* data, uint16_t length){
+
+
+    uint8_t startbytes[2]={0x31,~0x31};
+            if(connectted_boot())
+         { 	
+			 ESP_LOGI("main", "Bootloader conneted");
+		 
+			 uart_write_bytes(UART_PORT_NUM, &startbytes,2);
+			 
+			 if(ack_control()){
+            // Adres baytlarını doğru sırada gönder (MSB to LSB)
+            uint8_t addr_bytes[4];
+            addr_bytes[0] = (addres >> 24) & 0xFF;  // MSB (Byte 3)
+            addr_bytes[1] = (addres >> 16) & 0xFF;  // Byte 4
+            addr_bytes[2] = (addres >> 8) & 0xFF;   // Byte 5
+            addr_bytes[3] = addres & 0xFF;          // LSB (Byte 6)
+                
+                          
+             // Adres baytlarını gönder
+             uart_write_bytes(UART_PORT_NUM, &addr_bytes, 4);
+             // Sağlama toplamını (checksum) hesapla ve gönder
+              uint8_t checksum = addr_bytes[0] ^ addr_bytes[1] ^ addr_bytes[2] ^ addr_bytes[3];
+              uart_write_bytes(UART_PORT_NUM, &checksum, 1);
+              if (ack_control()) {
+                 ESP_LOGI("main", "adres ack ok");
+                 //veri boyutunu gönder 
+                 uint8_t lent=length-1;
+                 uart_write_bytes(UART_PORT_NUM, &lent, 1);
+                 //datayı gönder
+			     uart_write_bytes(UART_PORT_NUM, (uint8_t *)data, length);
+			     
+                 uint8_t dtr =calculate_checksum(lent,  (uint8_t *)data,  length);
+                  
+                 uart_write_bytes(UART_PORT_NUM, &dtr, 1);
+                 memset((uint8_t *)output_buffer, 0, 256) ;
+                 
+                 
+                    ESP_LOGI("main", "dtr=%d",dtr);
+                    
+                 if (ack_control()) {
+					   ESP_LOGI("main", "write succes");
+					   return true;
+					   
+					 
+					 
+				 }else {                
+                     ESP_LOGE("main", "write error");
+                     return false;
+                   }
+                 
+                 
+                 
+                 
+              }else{
+				 ESP_LOGE("main", "adres ack error");
+				  return false;
+			  }
+			  
+			  
+  
+			 }else {
+		        ESP_LOGE("main", "writing start ack error");
+               return false;
+             } 
+			 
+			
+	
+         }else{
+			 ESP_LOGE("main", "Bootloader not conneted");
+			return false; 
+		 }  	
+}
+
+
+
+bool go_app(uint32_t addres){
+	uint8_t gobytes[2]={0x21,~0x21};
+	            if(connectted_boot())
+    { 	
+			 ESP_LOGI("go_app", "Bootloader conneted");
+		 
+			 uart_write_bytes(UART_PORT_NUM, &gobytes,2);
+			 
+		if(ack_control()){
+		      // Adres baytlarını doğru sırada gönder (MSB to LSB)
+              uint8_t addr_bytes[4];
+                addr_bytes[0] = (addres >> 24) & 0xFF;  // MSB (Byte 3)
+                addr_bytes[1] = (addres >> 16) & 0xFF;  // Byte 4
+                addr_bytes[2] = (addres >> 8) & 0xFF;   // Byte 5
+                addr_bytes[3] = addres & 0xFF;          // LSB (Byte 6)
+               // Adres baytlarını gönder
+              uart_write_bytes(UART_PORT_NUM, &addr_bytes, 4);
+              // Sağlama toplamını (checksum) hesapla ve gönder
+              uint8_t checksum = addr_bytes[0] ^ addr_bytes[1] ^ addr_bytes[2] ^ addr_bytes[3];
+              uart_write_bytes(UART_PORT_NUM, &checksum, 1);
+              if (ack_control()) {
+				  ESP_LOGI("go_app", "JUMP SUCCESUFLY");
+				  exit_bootloader_mode();
+				  return true;
+				  
+				
+			  }else{
+				   ESP_LOGE("go_app", "JUMP ACK ERROR");
+				  return false;
+				 
+			  }
+				 
+				 
+		    }else{
+			  ESP_LOGE("go_app", "CMD ACK ERROR");
+			  return false;
+		     }
+		
+		
+	}else {
+		  ESP_LOGE("go_app", "Bootloader not conneted");
+          return false;
+    }
+		
+	
+}
+
+bool RDP_Lock(void){
+	 uint8_t clkbytes[2]={0x82,(uint8_t)~0x82};
+	        if(connectted_boot())
+    { 	
+			 ESP_LOGI("rdplck", "Bootloader conneted");
+			 uart_write_bytes(UART_PORT_NUM, &clkbytes,2);	 
+		if(ack_control()){
+			
+              if (ack_control()) {
+				  return true;
+				  ESP_LOGI("rdplck", "RDP LOCKED");
+				
+			  }else{
+				  return false;
+				  ESP_LOGE("rdplck", "2. ACK ERROR");
+			  }
+				 
+				 
+		    }else{
+			  ESP_LOGE("rdplck", "1. ACK ERROR");
+			  return false;
+		     }
+		
+		
+	}else {
+		  ESP_LOGE("rdplck", "Bootloader not conneted");
+          return false;
+    }
+		
+	
+}
+
+bool RDP_UnLock(void){
+	 uint8_t clkbytes[2]={0x92,(uint8_t)~0x92};
+	        if(connectted_boot())
+    { 	
+			 ESP_LOGI("rdpunlck", "Bootloader conneted");
+			 uart_write_bytes(UART_PORT_NUM, &clkbytes,2);	 
+		if(ack_control()){
+			
+              if (ack_control()) {
+				  return true;
+				  ESP_LOGI("rdpunlck", "RDP UNLOCKED");
+				
+			  }else{
+				  return false;
+				  ESP_LOGE("rdpunlck", "2. ACK ERROR");
+			  }
+				 
+				 
+		    }else{
+			  ESP_LOGE("rdpunlck", "1. ACK ERROR");
+			  return false;
+		     }
+		
+		
+	}else {
+		  ESP_LOGE("rdpunlck", "Bootloader not conneted");
+          return false;
+    }
+		
+	
+}
+
+uint8_t get_Id(){
+	 uint8_t idbytes[2]={0x02,~0x02};
+	        if(connectted_boot())
+    { 	
+			 ESP_LOGI("rdpunlck", "Bootloader conneted");
+			 uart_write_bytes(UART_PORT_NUM, &idbytes,2);	 
+		if(ack_control()){
+			uint8_t recv_data;
+			uint8_t read_buf[2];
+		    int length = 0;
+		    int length1 = 0;
+	        length = uart_read_bytes(UART_PORT_NUM, &recv_data, 1, 1000 / portTICK_PERIOD_MS);
+			if(length>0){ //STM32 İÇİN DATASHETT BİLGİSİ N-1 2byte -1byte 1 byte veri gelecek
+				   
+			 length1 = uart_read_bytes(UART_PORT_NUM, &read_buf, 2, 1000 / portTICK_PERIOD_MS);
+			 	if(length1>0){
+					 return read_buf[1]; 
+				 }else{
+					 ESP_LOGI("idunlck", "2.BOYUT OKUNMADI");
+				 }
+			}else{
+				ESP_LOGI("idunlck", "1.BOYUT OKUNMADI");
+			}
+			
+              if (ack_control()) {
+				  return true;
+				  ESP_LOGI("idunlck", "RDP UNLOCKED");
+				
+			  }else{
+				  return false;
+				  ESP_LOGE("idunlck", "2. ACK ERROR");
+			  }
+				 
+				 
+		    }else{
+			  ESP_LOGE("idunlck", "1. ACK ERROR");
+			  return false;
+		     }
+		
+		
+	}else {
+		  ESP_LOGE("idunlck", "Bootloader not conneted");
+          return false;
+    }
+	
+	
+}
+
+

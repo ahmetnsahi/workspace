@@ -1,0 +1,183 @@
+#include <stdbool.h>
+#include <stdint.h>
+#include <string.h>
+#include <stdlib.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+#include "freertos/semphr.h"
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "esp_event.h"
+#include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_http_client.h"
+#include "esp_https_ota.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+#include "cJSON.h"
+#include "esp_tls.h"
+#include "esp_crt_bundle.h"
+
+#define FIRMWARE_VERSION    "v1.0.0"
+#define UPDATE_JSON_URL     "https://raw.githubusercontent.com/ahmetnsahi/workspace/main/ESP_STM32_OTA/main/version.json"
+#define FIRMWARE_URL        "https://raw.githubusercontent.com/ahmetnsahi/workspace/main/ESP_STM32_OTA/build/app-template.bin"
+#define MAX_HTTP_BUFFER     8048
+
+static const char *TAG = "HTTPS_OTA";
+
+// Sertifika tanımlamaları
+extern const char github_chain_pem_start[] asm("_binary_github_chain_pem_start");
+extern const char github_chain_pem_end[] asm("_binary_github_chain_pem_end");
+
+// Global değişkenler
+static volatile bool update_flag = false;
+static SemaphoreHandle_t update_mutex = NULL;
+
+// HTTP yanıt yapısı
+typedef struct {
+    char *buffer;
+    size_t buffer_len;
+} http_response_t;
+
+// HTTP istemci olay işleyicisi
+static esp_err_t http_event_handler(esp_http_client_event_t *evt)
+{
+    http_response_t *resp = (http_response_t *)evt->user_data;
+
+    switch(evt->event_id) {
+        case HTTP_EVENT_ERROR:
+            ESP_LOGE(TAG, "HTTP_EVENT_ERROR");
+            break;
+        case HTTP_EVENT_ON_CONNECTED:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED");
+            break;
+        case HTTP_EVENT_ON_DATA:
+            if (!esp_http_client_is_chunked_response(evt->client)) {
+                if (resp->buffer == NULL) {
+                    resp->buffer = (char *)malloc(MAX_HTTP_BUFFER);
+                    if (resp->buffer == NULL) {
+                        ESP_LOGE(TAG, "Failed to allocate memory");
+                        return ESP_FAIL;
+                    }
+                    memset(resp->buffer, 0, MAX_HTTP_BUFFER);
+                    resp->buffer_len = 0;
+                }
+                
+                if ((resp->buffer_len + evt->data_len) < MAX_HTTP_BUFFER) {
+                    memcpy(resp->buffer + resp->buffer_len, evt->data, evt->data_len);
+                    resp->buffer_len += evt->data_len;
+                } else {
+                    ESP_LOGE(TAG, "Buffer overflow");
+                    return ESP_FAIL;
+                }
+            }
+            break;
+        default:
+            break;
+    }
+    return ESP_OK;
+}
+
+
+
+
+static void check_firmware_version(void) {
+    esp_http_client_config_t config = {
+        .url = FIRMWARE_URL, // Test edilecek URL
+        .crt_bundle_attach = esp_crt_bundle_attach, // Sertifika doğrulama
+        .timeout_ms = 2000,
+        .keep_alive_enable = true,
+    };
+
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    if (client == NULL) {
+        ESP_LOGE(TAG, "Failed to initialize HTTP client");
+        return;
+    }
+
+    // Bağlantıyı aç
+    esp_err_t err = esp_http_client_open(client, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open HTTP connection: %s", esp_err_to_name(err));
+        esp_http_client_cleanup(client);
+        return;
+    }
+
+    // HTTP başlıklarını kontrol et
+    int content_length = esp_http_client_fetch_headers(client);
+    if (content_length > 0) {
+        ESP_LOGI(TAG, "HTTP connection successful, content length: %d", content_length);
+    } else {
+        ESP_LOGW(TAG, "HTTP connection successful but content length is invalid: %d", content_length);
+    }
+
+    // HTTP durumu kontrol et
+    int status_code = esp_http_client_get_status_code(client);
+    ESP_LOGI(TAG, "HTTP status code: %d", status_code);
+
+    // İstemciyi temizlemeden önce bağlantıyı test ettik
+    esp_http_client_close(client);
+    esp_http_client_cleanup(client);
+
+    if (status_code == 200) {
+        ESP_LOGI(TAG, "Connection to firmware URL is successful");
+          ESP_LOGI(TAG, "Free heap size: %lu bytes",(unsigned long) esp_get_free_heap_size());
+
+           esp_https_ota_config_t ota_config;
+
+        // OTA için yeni yapılandırma
+        esp_http_client_config_t config = {
+            .url = FIRMWARE_URL, // OTA için aynı URL
+            .crt_bundle_attach = esp_crt_bundle_attach,
+            .buffer_size=2048,
+        };
+        
+         ota_config.http_config = &config;
+         ota_config.partial_http_download=true;
+         ota_config.max_http_request_size=4096;
+         
+        // OTA güncellemesini başlat
+        esp_err_t ret = esp_https_ota(&ota_config);
+        if (ret == ESP_OK) {
+            ESP_LOGI(TAG, "OTA update successful, restarting...");
+            esp_restart(); // Başarılı bir güncellemeden sonra cihazı yeniden başlat
+        } else {
+            ESP_LOGE(TAG, "OTA update failed: %s", esp_err_to_name(ret));
+        }
+    } else {
+        ESP_LOGE(TAG, "Connection to firmware URL failed with status code: %d", status_code);
+    }
+}
+   
+      
+      
+
+
+// OTA kontrol görevi
+void check_update_task(void *pvParameter)
+{
+    update_mutex = xSemaphoreCreateMutex();
+    
+    while (1) {
+        if (update_flag) {
+            if (xSemaphoreTake(update_mutex, portMAX_DELAY) == pdTRUE) {
+                update_flag = false;
+                check_firmware_version();
+                xSemaphoreGive(update_mutex);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+// OTA güncellemeyi başlat (dışarıdan çağrılabilir)
+void start_ota_update(void)
+{
+    if (update_mutex != NULL) {
+        if (xSemaphoreTake(update_mutex, portMAX_DELAY) == pdTRUE) {
+            update_flag = true;
+            xSemaphoreGive(update_mutex);
+        }
+    }
+}
+

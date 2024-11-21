@@ -1,0 +1,207 @@
+#include <stdbool.h>
+#include <string.h>
+#include <stdlib.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+#include "freertos/semphr.h"
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "esp_event.h"
+#include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_http_client.h"
+#include "esp_https_ota.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+#include "cJSON.h"
+#include "esp_tls.h"
+#include "esp_crt_bundle.h"
+
+#define FIRMWARE_VERSION    "v1.0.0"
+#define UPDATE_JSON_URL     "https://raw.githubusercontent.com/ahmetnsahi/workspace/main/ESP_STM32_OTA/main/version.json"
+#define FIRMWARE_URL        "http://raw.githubusercontent.com/ahmetnsahi/workspace/main/ESP_STM32_OTA/build/app-template.bin"
+#define MAX_HTTP_BUFFER     8048
+
+static const char *TAG = "HTTPS_OTA";
+
+// Sertifika tanımlamaları
+extern const char github_chain_pem_start[] asm("_binary_github_chain_pem_start");
+extern const char github_chain_pem_end[] asm("_binary_github_chain_pem_end");
+
+// Global değişkenler
+static volatile bool update_flag = false;
+static SemaphoreHandle_t update_mutex = NULL;
+
+// HTTP yanıt yapısı
+typedef struct {
+    char *buffer;
+    size_t buffer_len;
+} http_response_t;
+
+// HTTP istemci olay işleyicisi
+static esp_err_t http_event_handler(esp_http_client_event_t *evt)
+{
+    http_response_t *resp = (http_response_t *)evt->user_data;
+
+    switch(evt->event_id) {
+        case HTTP_EVENT_ERROR:
+            ESP_LOGE(TAG, "HTTP_EVENT_ERROR");
+            break;
+        case HTTP_EVENT_ON_CONNECTED:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED");
+            break;
+        case HTTP_EVENT_ON_DATA:
+            if (!esp_http_client_is_chunked_response(evt->client)) {
+                if (resp->buffer == NULL) {
+                    resp->buffer = (char *)malloc(MAX_HTTP_BUFFER);
+                    if (resp->buffer == NULL) {
+                        ESP_LOGE(TAG, "Failed to allocate memory");
+                        return ESP_FAIL;
+                    }
+                    memset(resp->buffer, 0, MAX_HTTP_BUFFER);
+                    resp->buffer_len = 0;
+                }
+                
+                if ((resp->buffer_len + evt->data_len) < MAX_HTTP_BUFFER) {
+                    memcpy(resp->buffer + resp->buffer_len, evt->data, evt->data_len);
+                    resp->buffer_len += evt->data_len;
+                } else {
+                    ESP_LOGE(TAG, "Buffer overflow");
+                    return ESP_FAIL;
+                }
+            }
+            break;
+        default:
+            break;
+    }
+    return ESP_OK;
+}
+
+static esp_http_client_config_t get_config(const char* url, http_event_handle_cb event_handler)
+{
+    esp_http_client_config_t config = {
+        .url = url,
+        .event_handler = event_handler,
+        .cert_pem = NULL;
+    };
+    return config;
+}
+
+
+// OTA güncelleme fonksiyonu
+static esp_err_t perform_ota_update(void)
+{
+    esp_err_t ret = ESP_FAIL;
+    
+        // Sertifika boyutunu kontrol et
+    size_t cert_size = github_chain_pem_end - github_chain_pem_start;
+    if (cert_size <= 0) {
+        ESP_LOGE(TAG, "Invalid certificate size: %d", cert_size);
+        return ESP_FAIL;
+    }
+
+    ESP_LOGI(TAG, "Certificate size: %d bytes", cert_size);
+
+    esp_http_client_config_t config = get_config(FIRMWARE_URL, http_event_handler);
+
+    esp_https_ota_config_t ota_config = {
+        .http_config = &config,
+        .partial_http_download = true,
+        .max_http_request_size = 8192
+    };
+
+    ESP_LOGI(TAG, "Starting OTA update...");
+    
+    // OTA işlemini başlat
+    ret = esp_https_ota(&ota_config);
+    
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "OTA update successful");
+        vTaskDelay(pdMS_TO_TICKS(1000));  // Sistem yeniden başlatılmadan önce kısa bir bekleme
+        esp_restart();
+    } else {
+        ESP_LOGE(TAG, "OTA update failed: %s", esp_err_to_name(ret));
+        
+        // Hata detaylarını yazdır
+        if (ret == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
+            ESP_LOGE(TAG, "OTA update already in progress");
+        } else if (ret == ESP_ERR_INVALID_ARG) {
+            ESP_LOGE(TAG, "Invalid argument");
+        } else if (ret == ESP_ERR_OTA_VALIDATE_FAILED) {
+            ESP_LOGE(TAG, "Image validation failed");
+        }
+    }
+    
+    return ret;
+}
+
+
+
+// Versiyon kontrolü ve güncelleme
+static void check_firmware_version(void)
+{
+               // OTA güncelleme kodu
+            esp_http_client_config_t config = {
+             .url = UPDATE_JSON_URL,
+           .event_handler = http_event_handler,
+            .crt_bundle_attach = esp_crt_bundle_attach,
+            };
+
+    http_response_t http_response = {0};
+    esp_http_client_handle_t client = esp_http_client_init(&config);
+    esp_http_client_set_user_data(client, &http_response);
+
+    esp_err_t err = esp_http_client_perform(client);
+    if (err == ESP_OK) {
+        if (esp_http_client_get_status_code(client) == 200) {
+            // JSON parse
+            cJSON *json = cJSON_Parse(http_response.buffer);
+            if (json != NULL) {
+                cJSON *version = cJSON_GetObjectItem(json, "version");
+                if (version != NULL && version->valuestring != NULL) {
+                    if (strcmp(version->valuestring, FIRMWARE_VERSION) != 0) {
+                        ESP_LOGI(TAG, "New firmware version available: %s", version->valuestring);
+                        perform_ota_update();
+                    } else {
+                        ESP_LOGI(TAG, "Firmware is up to date");
+                    }
+                }
+                cJSON_Delete(json);
+            }
+        }
+    }
+
+    if (http_response.buffer != NULL) {
+        free(http_response.buffer);
+    }
+    esp_http_client_cleanup(client);
+}
+
+// OTA kontrol görevi
+void check_update_task(void *pvParameter)
+{
+    update_mutex = xSemaphoreCreateMutex();
+    
+    while (1) {
+        if (update_flag) {
+            if (xSemaphoreTake(update_mutex, portMAX_DELAY) == pdTRUE) {
+                update_flag = false;
+                check_firmware_version();
+                xSemaphoreGive(update_mutex);
+            }
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+// OTA güncellemeyi başlat (dışarıdan çağrılabilir)
+void start_ota_update(void)
+{
+    if (update_mutex != NULL) {
+        if (xSemaphoreTake(update_mutex, portMAX_DELAY) == pdTRUE) {
+            update_flag = true;
+            xSemaphoreGive(update_mutex);
+        }
+    }
+}
+

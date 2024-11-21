@@ -1,0 +1,419 @@
+/*
+ * command.c
+ *
+ *  Created on: 30 Eki 2024
+ *      Author: ahmet
+ */
+ 
+#include "command.h"
+#include "driver/uart.h"
+#include "lwip/sockets.h"
+#include "portmacro.h"
+#include "stdio.h"
+#include "string.h"
+#include "main.h"
+
+#include "Bootloader.h"
+#include "tcp.h"
+#include "nvs.h"
+#include "esp_log.h"
+#include "bluetooth.h"
+#include "socket.h"
+#include "esp_wifi_types.h"
+#include "esp_wifi.h"
+#include "esp_netif_ip_addr.h"
+#include "freertos/semphr.h"
+#include "freertos/semphr.h"	
+#include "uartread.h"
+#include <stdbool.h>
+#include <stdint.h>
+#include "https.h"
+
+#define buff_size 1000
+char rx_bufferx[buff_size];
+int length=0;
+void process_command(char* command,uint16_t Size){
+
+  command[Size] = '\0';
+  
+               if(strncmp(command, RST, strlen(RST)) == 0) {           // Sistem reset
+                   log_cmd(LOG_TCP|LOG_ESP_INFO|LOG_BT,"SYSTEM RESTART!");
+                   reset_stm32();
+                   esp_restart();
+                   
+              }else if (strncmp(command, RSTE,strlen(RSTE)) == 0) {    // ESP reset
+                   log_cmd(LOG_TCP|LOG_ESP_INFO|LOG_BT,"ESP RESTART!");
+                   esp_restart();
+                               
+	          
+	          }else if (strncmp(command, RSTS,strlen(RSTS)) == 0) {    // STM reset
+                   log_cmd(LOG_TCP|LOG_ESP_INFO|LOG_BT,"STM RESTART!");
+                   reset_stm32();
+                 
+               }else if (strncmp(command, CHECK,strlen(CHECK)) == 0) {    // ESP reset
+                   log_cmd(LOG_TCP|LOG_ESP_INFO|LOG_BT,"CHECK!");
+                   	check_for_updates();
+                               
+	           
+                 
+                               
+	           }else if (strncmp(command, ESP,strlen(ESP)) == 0) {      // OTA FLAG ESP
+                          esp_stm_flag=1;
+                          log_cmd(LOG_TCP,"ESP BOOT");
+			   } else if (strncmp(command, STM,strlen(STM)) == 0) {    // OTA FLAG STM
+                          esp_stm_flag=2;
+                          log_cmd(LOG_TCP,"STM BOOT");
+                          
+                          
+		       } else if (strncmp(command, DELETE,strlen(DELETE)) == 0) {    // app hafıza sil
+			          	   stop_uart_task(); //uart flush tasın içine eklendi
+                           delay_ms(100);
+                           deinit_uartbootloader();      
+                           init_uartbootloader();
+                           delay_ms(500); 
+                           power_reset();  
+			           if(erase_full()){
+						   log_cmd(LOG_TCP,"Memory erasure operation successful");
+					   }else{
+						    log_cmd(LOG_TCP,"Memory erasure operation unsuccessful");
+					   }   
+	          }else if (strncmp(command, APP,strlen(APP)) == 0) {    // uygulamaya başla
+                           stop_uart_task(); //uart flush tasın içine eklendi
+                           delay_ms(100);
+                           deinit_uartbootloader();      
+                           init_uartbootloader();
+                           delay_ms(500); 
+                           power_reset();  
+                        if(go_app(0x08000000)){
+							 log_cmd(LOG_TCP,"GO APP SUCCESSFUL");
+							
+						}else {
+							 log_cmd(LOG_TCP,"GO APP UNSUCCESSFUL");
+						}
+	          }else if (strncmp(command, BOT,strlen(BOT)) == 0) {  //bootloadera gir
+                            enter_bootloader_mode();
+                           log_cmd(LOG_TCP,"ENTER BOOTLOADER");                   
+	          }else if (strncmp(command, START,strlen(START)) == 0) {    //appe git power ile 
+	                        log_cmd(LOG_TCP,"GO APP");    
+		                    exit_bootloader_mode();
+		                    reset_stm32();
+		                    power_reset();
+	          }else if (strncmp(command, OFF,strlen(OFF)) == 0) {    //STM OFF
+	                     log_cmd(LOG_TCP |LOG_BT,"STM OFF");  
+			             powerOf();
+		          
+		      }else if (strncmp(command, ON,strlen(ON)) == 0)    {    //STM ON
+			            log_cmd(LOG_TCP |LOG_BT,"STM ON");  
+			             powerOn();
+			             
+		      }else if (strncmp(command, PRE,strlen(PRE)) == 0) {    //RDP LOCK
+		      
+		                   stop_uart_task(); //uart flush tasın içine eklendi
+                           delay_ms(100);
+                           deinit_uartbootloader();      
+                           init_uartbootloader();
+                           delay_ms(500); 
+                           power_reset();                       
+                      if( RDP_Lock()){
+						      log_cmd(LOG_TCP |LOG_BT,"RDP_LOCK SUCCESSFUL");
+					  }else{
+						        log_cmd(LOG_TCP |LOG_BT,"RDP_LOCK UNSUCCESSFUL");
+					  }
+					  power_reset();
+	          }else if (strncmp(command, PRD,strlen(PRD)) == 0) {    //RDP UNLOCK 
+                     	   stop_uart_task(); //uart flush tasın içine eklendi
+                           delay_ms(100);
+                           deinit_uartbootloader();      
+                           init_uartbootloader();
+                           delay_ms(500); 
+                           power_reset(); 
+                     
+                      if( RDP_UnLock()){
+						   log_cmd(LOG_TCP |LOG_BT,"RDP_UNLOCK SUCCESSFUL");
+					  }else{
+						   log_cmd(LOG_TCP |LOG_BT,"RDP_UNLOCK UNSUCCESSFUL");
+					  }
+					  power_reset();
+					  
+	         }else if (strncmp(command, CRCQ,strlen(CRCQ)) == 0) {    //CRC OKUMA ŞUAN BOŞŞ
+			            // tcp_send("GELEN CRC=%"PRIu32"",Read_CRC);
+		     
+					 
+				           
+	             
+	             
+	             
+//--------------------------------------MODEM AYARLARI-------------------------------------------------------//	             
+   
+
+//--------------------------------------Wi-Fi ayarları-------------------------------------------------------//
+   }else if (strncmp(command, CONF, strlen(CONF)) == 0) { // Wi-Fi ayarları
+        char *ssid = strtok(command + strlen(CONF), ",");
+        char *password = strtok(NULL, ",");
+
+        if (ssid && password) {
+            // Wi-Fi bilgilerini NVS'ye kaydet
+            nvs_handle_t nvs_handle;
+            esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+            if (err == ESP_OK) {
+                nvs_set_str(nvs_handle, "wifi_ssid", ssid);
+                nvs_set_str(nvs_handle, "wifi_pass", password);
+                nvs_commit(nvs_handle);
+                nvs_close(nvs_handle);
+                  log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "WiFi bilgileri kaydedildi.");
+
+                wifi_restart();
+            } else {
+                log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "NVS ERROR");
+            }
+        } else {
+              log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "WiFi SSID veya password eksik.");
+        }
+        
+        
+ //------------------------------------- Port ayarı----------------------------------------------------//       
+        
+        
+    } else if (strncmp(command, PORT, strlen(PORT)) == 0) { // Port ayarı
+        char *port_str = command + strlen(PORT);
+        char *endptr;
+        long port = strtol(port_str, &endptr, 10);
+
+        if (endptr == port_str || *endptr != '\0' || port <= 0 || port > 65535) {
+            log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "Gecersiz port numarası: %s", port_str);
+        } else {
+            int port_number = (int)port;
+            log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "Port numarasi alindi: %d", port_number);
+
+            // Port numarasını NVS'ye kaydet
+            nvs_handle_t nvs_handle;
+            esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+            if (err == ESP_OK) {
+                nvs_set_i32(nvs_handle, "port_number", port_number);
+                nvs_commit(nvs_handle);
+                nvs_close(nvs_handle);
+                 log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO,"Port numarasi NVS'ye kaydedildi.");
+                // Gerekirse ilgili servisi yeniden başlatabilirsiniz
+            } else {
+                 log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "NVS acilamadi: %s", esp_err_to_name(err));
+            }
+        }
+        
+      //------------------------------------- IP ayarı----------------------------------------------------//      
+        
+        
+        }else if (strncmp(command, IP, strlen(IP)) == 0) { // IP ayarı
+    char *ip_str = command + strlen(IP);
+
+    // IP adresinin geçerli olup olmadığını kontrol et
+    struct in_addr addr;
+    if (inet_pton(AF_INET, ip_str, &addr) <= 0) {
+        log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO,  "Geçersiz IP adresi: %s", ip_str);
+        
+    } else {
+        log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "IP adresi alındı: %s", ip_str);
+
+        // IP adresini NVS'ye kaydet
+        nvs_handle_t nvs_handle;
+        esp_err_t err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+        if (err == ESP_OK) {
+            nvs_set_str(nvs_handle, "server_ip", ip_str);
+            nvs_commit(nvs_handle);
+            nvs_close(nvs_handle);
+            log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "IP adresi NVS'ye kaydedildi.");
+            // Gerekirse ilgili servisi yeniden başlatabilirsiniz
+        } else {
+            log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO,  "NVS Error!: %s", esp_err_to_name(err));
+        }
+    }
+
+        
+        
+        
+        
+           //------------------------------------- DWM1000 AYARLARI ----------------------------------------------------//      
+        
+    }else if (strncmp(command, ANC,strlen(ANC)) == 0) {  
+		
+                 length = 0;
+           infoflag=false;
+           delay_ms(10);
+           uart_flush(UART_PORT_NUM);
+           uart_write_bytes(UART_PORT_NUM, command, Size);
+           
+           length = uart_read_bytes(UART_PORT_NUM, rx_bufferx, buff_size, 5 );
+           if (length > 0) {
+               send(sock, rx_bufferx, length,0);    
+               bt_send_char(rx_bufferx,length);
+                
+             } else {
+              // Okuma başarısız veya veri gelmedi
+            }
+            infoflag=true;
+		
+    }else if (strncmp(command, SYNC,strlen(SYNC)) == 0) {  
+	            length = 0;
+           infoflag=false;
+           delay_ms(10);
+           uart_flush(UART_PORT_NUM);
+           uart_write_bytes(UART_PORT_NUM, command, Size);
+           
+           length = uart_read_bytes(UART_PORT_NUM, rx_bufferx, buff_size, 5);
+           if (length > 0) {
+               send(sock, rx_bufferx, length,0);    
+               bt_send_char(rx_bufferx,length);
+                
+             } else {
+              // Okuma başarısız veya veri gelmedi
+            }
+            infoflag=true;
+            
+   }else if (strncmp(command, RATIO,strlen(RATIO)) == 0) {  
+              length = 0;
+           infoflag=false;
+           delay_ms(10);
+           uart_flush(UART_PORT_NUM);
+           uart_write_bytes(UART_PORT_NUM, command, Size);
+           
+           length = uart_read_bytes(UART_PORT_NUM, rx_bufferx, buff_size, 5 );
+           if (length > 0) {
+               send(sock, rx_bufferx, length,0);    
+               bt_send_char(rx_bufferx,length);
+                
+             } else {
+              // Okuma başarısız veya veri gelmedi
+            }
+            infoflag=true;
+   }else if (strncmp(command, TAG,strlen(TAG)) == 0) { 
+	    
+            length = 0;
+           infoflag=false;
+           delay_ms(10);
+           uart_flush(UART_PORT_NUM);
+           uart_write_bytes(UART_PORT_NUM, command, Size);
+           
+           length = uart_read_bytes(UART_PORT_NUM, rx_bufferx, buff_size, 5 );
+           if (length > 0) {
+               send(sock, rx_bufferx, length,0);    
+               bt_send_char(rx_bufferx,length);
+                
+             } else {
+              // Okuma başarısız veya veri gelmedi
+            }
+            infoflag=true;
+            
+       }else if (strncmp(command, DWM,strlen(DWM)) == 0) {  
+		
+            length = 0;
+           infoflag=false;
+           delay_ms(10);
+           uart_flush(UART_PORT_NUM);
+           uart_write_bytes(UART_PORT_NUM, command, Size);
+           
+           length = uart_read_bytes(UART_PORT_NUM, rx_bufferx, buff_size, 5 );
+           if (length > 0) {
+               send(sock, rx_bufferx, length,0);    
+               bt_send_char(rx_bufferx,length);
+                
+             } else {
+              // Okuma başarısız veya veri gelmedi
+            }
+            infoflag=true;
+ 
+ 
+            
+  //------------------------------------------------------------------------------------------------------//      
+     
+     
+     
+     
+                //------------------------------------- İNFO AYARLARI ----------------------------------------------------//      
+        
+    }else if (strncmp(command, INF,strlen(INF)) == 0) {  
+		
+		  wifi_config_t current_config;
+          esp_wifi_get_config(WIFI_IF_STA, &current_config);  
+
+           esp_netif_ip_info_t ip_info;
+
+        // Varsayılan Wi-Fi istasyon arabirimini al
+                esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+              if (netif == NULL) {
+               ESP_LOGE(TAG, "Wi-Fi istasyon arayüzü alınamadı.");
+               return;
+              }
+
+               // IP bilgilerini al ve yazdır
+            if (esp_netif_get_ip_info(netif, &ip_info) == ESP_OK) {
+			  log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "======== Modem INFO ========\n");
+              log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "-->IP Address: " IPSTR, IP2STR(&ip_info.ip));
+              log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "-->Gateway: " IPSTR, IP2STR(&ip_info.gw));
+              log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "-->Netmask: " IPSTR, IP2STR(&ip_info.netmask));
+            } else {
+            ESP_LOGE(TAG, "IP bilgileri alınamadı.");
+              }
+           log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO,  "-->WiFi SSID=\"%s\", \n-->WiFi PASSWORD=\"%s\"", current_config.sta.ssid, current_config.sta.password);
+           log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "\n======== TCP Server INFO ========\n");
+           log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO,  "-->IP: %s \n-->Port: %" PRId32 "", server_ip, port_number);
+           log_cmd(LOG_TCP|LOG_BT|LOG_ESP_INFO, "\n======== DWM1000 INFO ========\n");         
+          
+           // Gelen veriyi almak için bir tampon bellek oluşturun
+           
+            length = 0;
+           infoflag=false;
+           delay_ms(10);
+           uart_flush(UART_PORT_NUM);
+           uart_write_bytes(UART_PORT_NUM, command, Size);
+           
+           length = uart_read_bytes(UART_PORT_NUM, rx_bufferx, buff_size, 10 );
+           if (length > 0) {
+               send(sock, rx_bufferx, length,0);    
+               bt_send_char(rx_bufferx,length);
+                
+             } else {
+              // Okuma başarısız veya veri gelmedi
+            }
+            infoflag=true;
+           
+  //------------------------------------------------------------------------------------------------------// 
+     
+     
+     
+     
+   
+     
+     
+        
+    } else {
+        log_cmd(LOG_TCP|LOG_ESP_INFO|LOG_BT,"UNKNOW COMMAND!");
+    }
+		
+}
+
+
+// Log fonksiyonu
+void log_cmd(int log_types, const char *format, ...) {
+    char log_buffer[256];
+    va_list args;
+    
+    // Mesajı formatla ve başına '\n\r' ekleyin
+    va_start(args, format);
+    snprintf(log_buffer, sizeof(log_buffer), "\n");  // Başına eklemek istediğimiz karakterleri yerleştiriyoruz
+    vsnprintf(log_buffer + 1, sizeof(log_buffer) - 1, format, args); // Formatlı mesajı kalan kısma ekliyoruz
+    va_end(args);
+    
+    // Hangi log türlerine gönderim yapılacaksa ona göre işle
+    if (log_types & LOG_BT) {
+        bt_send_data(log_buffer);  // Bluetooth üzerinden gönder
+    }
+    if (log_types & LOG_TCP) {
+        tcp_send(log_buffer); // TCP üzerinden gönder
+    }
+    if (log_types & LOG_ESP_INFO) {
+        ESP_LOGI(TAG, "%s", log_buffer);  // ESP info log
+    }
+    if (log_types & LOG_ESP_ERROR) {
+        ESP_LOGE(TAG, "%s", log_buffer); // ESP error log
+    }
+}
+

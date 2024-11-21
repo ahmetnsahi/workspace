@@ -1,0 +1,145 @@
+-- Building ESP-IDF components for target esp32
+-- Project sdkconfig file C:/Users/ahmet/workspace/ESP_STM32_OTA/sdkconfig
+-- Compiler supported targets: xtensa-esp-elf
+-- App "app-template" version: 6ed2b32-dirty
+-- Adding linker script C:/Users/ahmet/workspace/ESP_STM32_OTA/build/esp-idf/esp_system/ld/memory.ld
+-- Adding linker script C:/Users/ahmet/workspace/ESP_STM32_OTA/build/esp-idf/esp_system/ld/sections.ld.in
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_rom/esp32/ld/esp32.rom.ld
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_rom/esp32/ld/esp32.rom.api.ld
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_rom/esp32/ld/esp32.rom.libgcc.ld
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_rom/esp32/ld/esp32.rom.newlib-data.ld
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_rom/esp32/ld/esp32.rom.syscalls.ld
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_rom/esp32/ld/esp32.rom.newlib-funcs.ld
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/soc/esp32/ld/esp32.peripherals.ld
+-- Components: app_trace app_update bootloader bootloader_support bt cmock console cxx driver efuse esp-tls esp_adc esp_app_format esp_bootloader_format esp_coex esp_common esp_driver_ana_cmpr esp_driver_cam esp_driver_dac esp_driver_gpio esp_driver_gptimer esp_driver_i2c esp_driver_i2s esp_driver_isp esp_driver_jpeg esp_driver_ledc esp_driver_mcpwm esp_driver_parlio esp_driver_pcnt esp_driver_ppa esp_driver_rmt esp_driver_sdio esp_driver_sdm esp_driver_sdmmc esp_driver_sdspi esp_driver_spi esp_driver_touch_sens esp_driver_tsens esp_driver_uart esp_driver_usb_serial_jtag esp_eth esp_event esp_gdbstub esp_hid esp_http_client esp_http_server esp_https_ota esp_https_server esp_hw_support esp_lcd esp_local_ctrl esp_mm esp_netif esp_netif_stack esp_partition esp_phy esp_pm esp_psram esp_ringbuf esp_rom esp_system esp_timer esp_vfs_console esp_wifi espcoredump esptool_py fatfs freertos hal heap http_parser idf_test ieee802154 json log lwip main mbedtls mqtt newlib nvs_flash nvs_sec_provider openthread partition_table perfmon protobuf-c protocomm pthread sdmmc soc spi_flash spiffs tcp_transport ulp unity usb vfs wear_levelling wifi_provisioning wpa_supplicant xtensa
+-- Component paths: C:/Espressif/frameworks/esp-idf-v5.3.1/components/app_trace C:/Espressif/frameworks/esp-idf-v5.3.1/components/app_update C:/Espressif/frameworks/esp-idf-v5.3.1/components/bootloader C:/Espressif/frameworks/esp-idf-v5.3.1/components/bootloader_support C:/Espressif/frameworks/esp-idf-v5.3.1/components/bt C:/Espressif/frameworks/esp-idf-v5.3.1/components/cmock C:/Espressif/frameworks/esp-idf-v5.3.1/components/console C:/Espressif/frameworks/esp-idf-v5.3.1/components/cxx C:/Espressif/frameworks/esp-idf-v5.3.1/components/driver C:/Espressif/frameworks/esp-idf-v5.3.1/components/efuse C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp-tls C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_adc C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_app_format C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_bootloader_format C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_coex C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_common C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_ana_cmpr C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_cam C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_dac C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_gpio C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_gptimer C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_i2c C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_i2s C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_isp C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_jpeg C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_ledc C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_mcpwm C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_parlio C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_pcnt C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_ppa C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_rmt C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_sdio C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_sdm C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_sdmmc C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_sdspi C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_spi C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_touch_sens C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_tsens C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_uart C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_driver_usb_serial_jtag C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_eth C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_event C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_gdbstub C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_hid C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_http_client C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_http_server C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_https_ota C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_https_server C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_hw_support C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_lcd C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_local_ctrl C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_mm C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_netif C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_netif_stack C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_partition C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_phy C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_pm C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_psram C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_ringbuf C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_rom C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_system C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_timer C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_vfs_console C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_wifi C:/Espressif/frameworks/esp-idf-v5.3.1/components/espcoredump C:/Espressif/frameworks/esp-idf-v5.3.1/components/esptool_py C:/Espressif/frameworks/esp-idf-v5.3.1/components/fatfs C:/Espressif/frameworks/esp-idf-v5.3.1/components/freertos C:/Espressif/frameworks/esp-idf-v5.3.1/components/hal C:/Espressif/frameworks/esp-idf-v5.3.1/components/heap C:/Espressif/frameworks/esp-idf-v5.3.1/components/http_parser C:/Espressif/frameworks/esp-idf-v5.3.1/components/idf_test C:/Espressif/frameworks/esp-idf-v5.3.1/components/ieee802154 C:/Espressif/frameworks/esp-idf-v5.3.1/components/json C:/Espressif/frameworks/esp-idf-v5.3.1/components/log C:/Espressif/frameworks/esp-idf-v5.3.1/components/lwip C:/Users/ahmet/workspace/ESP_STM32_OTA/main C:/Espressif/frameworks/esp-idf-v5.3.1/components/mbedtls C:/Espressif/frameworks/esp-idf-v5.3.1/components/mqtt C:/Espressif/frameworks/esp-idf-v5.3.1/components/newlib C:/Espressif/frameworks/esp-idf-v5.3.1/components/nvs_flash C:/Espressif/frameworks/esp-idf-v5.3.1/components/nvs_sec_provider C:/Espressif/frameworks/esp-idf-v5.3.1/components/openthread C:/Espressif/frameworks/esp-idf-v5.3.1/components/partition_table C:/Espressif/frameworks/esp-idf-v5.3.1/components/perfmon C:/Espressif/frameworks/esp-idf-v5.3.1/components/protobuf-c C:/Espressif/frameworks/esp-idf-v5.3.1/components/protocomm C:/Espressif/frameworks/esp-idf-v5.3.1/components/pthread C:/Espressif/frameworks/esp-idf-v5.3.1/components/sdmmc C:/Espressif/frameworks/esp-idf-v5.3.1/components/soc C:/Espressif/frameworks/esp-idf-v5.3.1/components/spi_flash C:/Espressif/frameworks/esp-idf-v5.3.1/components/spiffs C:/Espressif/frameworks/esp-idf-v5.3.1/components/tcp_transport C:/Espressif/frameworks/esp-idf-v5.3.1/components/ulp C:/Espressif/frameworks/esp-idf-v5.3.1/components/unity C:/Espressif/frameworks/esp-idf-v5.3.1/components/usb C:/Espressif/frameworks/esp-idf-v5.3.1/components/vfs C:/Espressif/frameworks/esp-idf-v5.3.1/components/wear_levelling C:/Espressif/frameworks/esp-idf-v5.3.1/components/wifi_provisioning C:/Espressif/frameworks/esp-idf-v5.3.1/components/wpa_supplicant C:/Espressif/frameworks/esp-idf-v5.3.1/components/xtensa
+-- Configuring done
+-- Generating done
+-- Build files have been written to: C:/Users/ahmet/workspace/ESP_STM32_OTA/build
+[0/1] Re-running CMake...
+[1/8] Performing build step for 'bootloader'
+-- Building ESP-IDF components for target esp32
+-- Project sdkconfig file C:/Users/ahmet/workspace/ESP_STM32_OTA/sdkconfig
+-- Compiler supported targets: xtensa-esp-elf
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/soc/esp32/ld/esp32.peripherals.ld
+-- Bootloader project name: "bootloader" version: 1
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_rom/esp32/ld/esp32.rom.ld
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_rom/esp32/ld/esp32.rom.api.ld
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_rom/esp32/ld/esp32.rom.libgcc.ld
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_rom/esp32/ld/esp32.rom.newlib-funcs.ld
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/bootloader/subproject/main/ld/esp32/bootloader.ld
+-- Adding linker script C:/Espressif/frameworks/esp-idf-v5.3.1/components/bootloader/subproject/main/ld/esp32/bootloader.rom.ld
+-- Components: bootloader bootloader_support efuse esp_app_format esp_bootloader_format esp_common esp_hw_support esp_rom esp_system esptool_py freertos hal log main micro-ecc newlib partition_table soc spi_flash xtensa
+-- Component paths: C:/Espressif/frameworks/esp-idf-v5.3.1/components/bootloader C:/Espressif/frameworks/esp-idf-v5.3.1/components/bootloader_support C:/Espressif/frameworks/esp-idf-v5.3.1/components/efuse C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_app_format C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_bootloader_format C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_common C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_hw_support C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_rom C:/Espressif/frameworks/esp-idf-v5.3.1/components/esp_system C:/Espressif/frameworks/esp-idf-v5.3.1/components/esptool_py C:/Espressif/frameworks/esp-idf-v5.3.1/components/freertos C:/Espressif/frameworks/esp-idf-v5.3.1/components/hal C:/Espressif/frameworks/esp-idf-v5.3.1/components/log C:/Espressif/frameworks/esp-idf-v5.3.1/components/bootloader/subproject/main C:/Espressif/frameworks/esp-idf-v5.3.1/components/bootloader/subproject/components/micro-ecc C:/Espressif/frameworks/esp-idf-v5.3.1/components/newlib C:/Espressif/frameworks/esp-idf-v5.3.1/components/partition_table C:/Espressif/frameworks/esp-idf-v5.3.1/components/soc C:/Espressif/frameworks/esp-idf-v5.3.1/components/spi_flash C:/Espressif/frameworks/esp-idf-v5.3.1/components/xtensa
+-- Configuring done
+-- Generating done
+-- Build files have been written to: C:/Users/ahmet/workspace/ESP_STM32_OTA/build/bootloader
+[0/1] Re-running CMake...
+[1/1] cmd.exe /C "cd /D C:\Users\ahmet\workspace\ESP_STM32_OTA\build\bootloader\esp-idf\esptool_py && C:\Espressif\python_env\idf5.3_py3.11_env\Scripts\python.exe C:/Espressif/frameworks/esp-idf-v5.3.1/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x1000 C:/Users/ahmet/workspace/ESP_STM32_OTA/build/bootloader/bootloader.bin"
+Bootloader binary size 0x6880 bytes. 0x780 bytes (7%) free.
+[2/6] Generating ld/sections.ld
+[3/6] Linking CXX executable app-template.elf
+[4/6] Generating binary image from built executable
+esptool.py v4.8.1
+Creating esp32 image...
+Merged 2 ELF sections
+Successfully created esp32 image.
+Generated C:/Users/ahmet/workspace/ESP_STM32_OTA/build/app-template.bin
+[5/6] cmd.exe /C "cd /D C:\Users\ahmet\workspace\ESP_STM32_OTA\build\esp-idf\esptool_py && C:\Espressif\python_env\idf5.3_py3.11_env\Scripts\python.exe C:/Espressif/frameworks/esp-idf-v5.3.1/components/partition_table/check_sizes.py --offset 0x8000 partition --type app C:/Users/ahmet/workspace/ESP_STM32_OTA/build/partition_table/partition-table.bin C:/Users/ahmet/workspace/ESP_STM32_OTA/build/app-template.bin"
+app-template.bin binary size 0x17ac40 bytes. Smallest app partition is 0x1d0000 bytes. 0x553c0 bytes (18%) free.
+[5/6] cmd.exe /C "cd /D C:\Espressif\frameworks\esp-idf-v5.3.1\components\esptool_py && C:\Espressifesptool.py --chip esp32 -p COM13 -b 460800 --before=default_reset --after=hard_reset write_flash --flash_mode dio --flash_freq 80m --flash_size 4MB 0x1000 bootloader/bootloader.bin 0x10000 app-template.bin 0x8000 partition_table/partition-table.bin 0xd000 ota_data_initial.bin
+esptool.py v4.8.1
+Serial port COM13
+Connecting.....
+Chip is ESP32-D0WDQ6 (revision v1.0)
+Features: WiFi, BT, Dual Core, 240MHz, VRef calibration in efuse, Coding Scheme None
+Crystal is 40MHz
+MAC: 80:7d:3a:ee:54:68
+Uploading stub...
+Running stub...
+Stub running...
+Changing baud rate to 460800
+Changed.
+Configuring flash size...
+Flash will be erased from 0x00001000 to 0x00007fff...
+Flash will be erased from 0x00010000 to 0x0018afff...
+Flash will be erased from 0x00008000 to 0x00008fff...
+Flash will be erased from 0x0000d000 to 0x0000efff...
+SHA digest in image updated
+Compressed 26752 bytes to 16375...
+Writing at 0x00001000... (100 %)
+Wrote 26752 bytes (16375 compressed) at 0x00001000 in 0.8 seconds (effective 268.1 kbit/s)...
+Hash of data verified.
+Compressed 1551424 bytes to 943935...
+Writing at 0x00010000... (1 %)
+Writing at 0x0001e8d4... (3 %)
+Writing at 0x0002ef30... (5 %)
+Writing at 0x0003b26a... (6 %)
+Writing at 0x00043a50... (8 %)
+Writing at 0x000488b1... (10 %)
+Writing at 0x0005027d... (12 %)
+Writing at 0x0005bdb1... (13 %)
+Writing at 0x00061c56... (15 %)
+Writing at 0x000675cc... (17 %)
+Writing at 0x0006d6fc... (18 %)
+Writing at 0x00073313... (20 %)
+Writing at 0x00078ce1... (22 %)
+Writing at 0x0007e7ce... (24 %)
+Writing at 0x0008465b... (25 %)
+Writing at 0x0008a490... (27 %)
+Writing at 0x00091270... (29 %)
+Writing at 0x000970d6... (31 %)
+Writing at 0x0009d834... (32 %)
+Writing at 0x000a3cc3... (34 %)
+Writing at 0x000aa09b... (36 %)
+Writing at 0x000b00de... (37 %)
+Writing at 0x000b612a... (39 %)
+Writing at 0x000bc03d... (41 %)
+Writing at 0x000c23fa... (43 %)
+Writing at 0x000c88b2... (44 %)
+Writing at 0x000ce379... (46 %)
+Writing at 0x000d3f13... (48 %)
+Writing at 0x000d9adb... (50 %)
+Writing at 0x000df824... (51 %)
+Writing at 0x000e57d8... (53 %)
+Writing at 0x000eb6d0... (55 %)
+Writing at 0x000f13f0... (56 %)
+Writing at 0x000f7bb9... (58 %)
+Writing at 0x000fd0c7... (60 %)
+Writing at 0x0010244b... (62 %)
+Writing at 0x0010799d... (63 %)
+Writing at 0x0010cd01... (65 %)
+Writing at 0x001123d5... (67 %)
+Writing at 0x00117b32... (68 %)
+Writing at 0x0011d735... (70 %)
+Writing at 0x00122efe... (72 %)
+Writing at 0x00128c10... (74 %)
+Writing at 0x0012f38d... (75 %)
+Writing at 0x00134eec... (77 %)
+Writing at 0x0013a951... (79 %)
+Writing at 0x0014034b... (81 %)
+Writing at 0x0014630c... (82 %)
+Writing at 0x0014c31d... (84 %)
+Writing at 0x001520c0... (86 %)
+Writing at 0x001587e4... (87 %)
+Writing at 0x00162702... (89 %)
+Writing at 0x0016a1ce... (91 %)
+Writing at 0x0017058f... (93 %)
+Writing at 0x00176022... (94 %)
+Writing at 0x0017bd2e... (96 %)
+Writing at 0x001820be... (98 %)
+Writing at 0x00187366... (100 %)
+Wrote 1551424 bytes (943935 compressed) at 0x00010000 in 22.0 seconds (effective 564.3 kbit/s)...
+Hash of data verified.
+Compressed 3072 bytes to 145...
+Writing at 0x00008000... (100 %)
+Wrote 3072 bytes (145 compressed) at 0x00008000 in 0.1 seconds (effective 343.4 kbit/s)...
+Hash of data verified.
+Compressed 8192 bytes to 31...
+Writing at 0x0000d000... (100 %)
+Wrote 8192 bytes (31 compressed) at 0x0000d000 in 0.1 seconds (effective 480.0 kbit/s)...
+Hash of data verified.
+
+Leaving...
+Hard resetting via RTS pin...
+\tools\cmake\3.24.0\bin\cmake.exe -D IDF_PATH=C:/Espressif/frameworks/esp-idf-v5.3.1 -D SERIAL_TOOL=C:/Espressif/python_env/idf5.3_py3.11_env/Scripts/python.exe;;C:/Espressif/frameworks/esp-idf-v5.3.1/components/esptool_py/esptool/esptool.py;--chip;esp32 -D SERIAL_TOOL_ARGS=--before=default_reset;--after=hard_reset;write_flash;@flash_args -D WORKING_DIRECTORY=C:/Users/ahmet/workspace/ESP_STM32_OTA/build -P C:/Espressif/frameworks/esp-idf-v5.3.1/components/esptool_py/run_serial_tool.cmake"

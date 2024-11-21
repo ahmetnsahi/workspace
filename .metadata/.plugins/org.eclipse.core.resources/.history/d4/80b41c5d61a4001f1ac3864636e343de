@@ -1,0 +1,200 @@
+#include <string.h>
+#include <stdlib.h>
+#include "freertos/FreeRTOS.h"
+#include "freertos/event_groups.h"
+#include "esp_system.h"
+#include "esp_wifi.h"
+#include "esp_event.h"
+#include "esp_log.h"
+#include "esp_ota_ops.h"
+#include "esp_http_client.h"
+#include "esp_https_ota.h"
+#include "nvs.h"
+#include "nvs_flash.h"
+#include "cJSON.h"
+#include "esp_crt_bundle.h"
+
+#define FIRMWARE_VERSION    "v1.0.0"
+
+
+#define UPDATE_JSON_URL "https://raw.githubusercontent.com/ahmetnsahi/workspace/main/ESP_STM32_OTA/main/version.json"
+#define FIRMWARE_URL    "https://raw.githubusercontent.com/ahmetnsahi/workspace/main/ESP_STM32_OTA/build/app-template.bin"
+
+
+#define GITHUB_TOKEN       "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"
+
+static const char *TAG = "HTTPS_OTA";
+// Maksimum tampon boyutu tanımla
+#define MAX_HTTP_OUTPUT_BUFFER 2048
+
+// Yanıt verilerini tutmak için yapı tanımla
+typedef struct {
+    char *buffer;
+    int buffer_len;
+} http_response_t;
+
+// Güncelleme bayrağını tanımla
+volatile int update_flag = 0; // Bu bayrak başka bir dosyadan Bluetooth ile 1 olarak ayarlanacak
+
+// HTTP İstemcisi olay işleyicisi
+esp_err_t _http_event_handler(esp_http_client_event_t *evt)
+{
+    http_response_t *resp = (http_response_t *)evt->user_data;
+
+    switch(evt->event_id) {
+        case HTTP_EVENT_ERROR:
+            ESP_LOGI(TAG, "HTTP_EVENT_ERROR");
+            break;
+        case HTTP_EVENT_ON_CONNECTED:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_CONNECTED");
+            break;
+        case HTTP_EVENT_HEADER_SENT:
+            ESP_LOGI(TAG, "HTTP_EVENT_HEADER_SENT");
+            break;
+        case HTTP_EVENT_ON_HEADER:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_HEADER");
+            break;
+        case HTTP_EVENT_ON_DATA: {
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_DATA, len=%d", evt->data_len);
+            // Yanıt verilerini biriktir
+            if (!esp_http_client_is_chunked_response(evt->client)) {
+                if (resp->buffer == NULL) {
+                    resp->buffer = (char *) malloc(MAX_HTTP_OUTPUT_BUFFER);
+                    resp->buffer_len = 0;
+                    if (resp->buffer == NULL) {
+                        ESP_LOGE(TAG, "Çıktı tamponu için bellek ayırma başarısız");
+                        return ESP_FAIL;
+                    }
+                }
+                if (resp->buffer_len + evt->data_len < MAX_HTTP_OUTPUT_BUFFER) {
+                    memcpy(resp->buffer + resp->buffer_len, evt->data, evt->data_len);
+                    resp->buffer_len += evt->data_len;
+                } else {
+                    ESP_LOGE(TAG, "Çıktı tamponu için yeterli bellek yok");
+                    return ESP_FAIL;
+                }
+            }
+            break;
+        }
+        case HTTP_EVENT_ON_FINISH:
+            ESP_LOGI(TAG, "HTTP_EVENT_ON_FINISH");
+            break;
+        case HTTP_EVENT_DISCONNECTED:
+            ESP_LOGI(TAG, "HTTP_EVENT_DISCONNECTED");
+            break;
+        case HTTP_EVENT_REDIRECT:
+            ESP_LOGI(TAG, "HTTP_EVENT_REDIRECT");
+            break;
+    }
+    return ESP_OK;
+}
+
+// OTA güncelleme görevi
+void check_update_task(void *pvParameter)
+{
+    while (1) {
+        // update_flag 1 olana kadar bekle
+        if (update_flag == 1) {
+            ESP_LOGI(TAG, "OTA Starting...");
+            
+            // Bayrağı sıfırla
+            update_flag = 0;
+
+            // OTA güncelleme kodu
+            esp_http_client_config_t config = {
+                .url = UPDATE_JSON_URL,
+                .event_handler = _http_event_handler,
+                .crt_bundle_attach = esp_crt_bundle_attach,
+            };
+
+            esp_http_client_handle_t client = esp_http_client_init(&config);
+
+               // Authorization başlığını ekleyin
+                  char auth_header[128];
+               snprintf(auth_header, sizeof(auth_header), "token %s", GITHUB_TOKEN);
+               esp_http_client_set_header(client, "Authorization", auth_header);
+               // Kullanıcı Aracısı ekle (isteğe bağlı)
+                esp_http_client_set_header(client, "User-Agent", "esp32");
+
+            // Yanıt yapısını başlat
+            http_response_t http_response = {0};
+            esp_http_client_set_user_data(client, &http_response);
+
+            esp_err_t err = esp_http_client_perform(client);
+            if (err == ESP_OK) {
+                int status_code = esp_http_client_get_status_code(client);
+                if (status_code == 200) {
+                    // Tamponu null ile sonlandır
+                    if (http_response.buffer_len < MAX_HTTP_OUTPUT_BUFFER) {
+                        http_response.buffer[http_response.buffer_len] = '\0';
+                    } else {
+                        http_response.buffer[MAX_HTTP_OUTPUT_BUFFER - 1] = '\0';
+                    }
+
+                    ESP_LOGI(TAG, "Alinan JSON: %s", http_response.buffer);
+
+                    // JSON'u parse et
+                    cJSON *json = cJSON_Parse(http_response.buffer);
+                    if (json == NULL) {
+                        ESP_LOGE(TAG, "JSON parse edilemedi");
+                    } else {
+                        cJSON *version_item = cJSON_GetObjectItem(json, "version");
+                        if (version_item == NULL) {
+                            ESP_LOGE(TAG, "JSON icinde 'version' alani yok");
+                        } else {
+                            char *new_version = version_item->valuestring;
+                            ESP_LOGI(TAG, "Mevcut versiyon: %s, Update versiyon: %s", FIRMWARE_VERSION, new_version);
+                            // Versiyonları karşılaştır
+                            if (strcmp(new_version, FIRMWARE_VERSION) != 0) {
+                                ESP_LOGI(TAG, "New firmware. Update starting.");
+                                
+                                esp_http_client_config_t ota_client_config = {
+                                    .url = FIRMWARE_URL,
+                                    .event_handler = NULL,
+                                    .crt_bundle_attach = esp_crt_bundle_attach,
+                                };
+                                
+                                esp_http_client_handle_t ota_client = esp_http_client_init(&ota_client_config);
+
+                               // Authorization başlığını ekleyin
+                                   esp_http_client_set_header(ota_client, "Authorization", auth_header);
+                                
+                                
+                                
+                                
+
+                                esp_https_ota_config_t ota_config = {
+                                    .http_config = &ota_client_config,
+                                };
+
+                                esp_err_t ota_result = esp_https_ota(&ota_config);
+                                if (ota_result == ESP_OK) {
+                                    ESP_LOGI(TAG, "OTA succes");
+                                    esp_restart();
+                                } else {
+                                    ESP_LOGE(TAG, "OTA unsucces!");
+                                }
+                            } else {
+                                ESP_LOGI(TAG, "Firmware guncel");
+                            }
+                        }
+                        cJSON_Delete(json);
+                    }
+                } else {
+                    ESP_LOGE(TAG, "version.json indirilemedi, HTTP status code: %d", status_code);
+                }
+            } else {
+                ESP_LOGE(TAG, "HTTP istek error: %s", esp_err_to_name(err));
+            }
+            if (http_response.buffer != NULL) {
+                free(http_response.buffer);
+            }
+            esp_http_client_cleanup(client);
+        }
+        // Diğer görevlere izin ver
+        vTaskDelay(100 / portTICK_PERIOD_MS); // 100 ms gecikme
+    }
+}
+
+// Wi-Fi olay işleyicisi ve başlatma fonksiyonları
+// ...

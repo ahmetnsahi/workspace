@@ -1,0 +1,156 @@
+#include "arch/sys_arch.h"
+#include "bluetooth.h"
+#include "driver/uart.h"
+#include "esp_timer.h"
+#include "freertos/projdefs.h"
+#include "hal/gpio_types.h"
+#include <stdint.h>
+#include <stdio.h>
+#include <stdbool.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/types.h>
+#include <sys/unistd.h>
+#include <unistd.h>
+#include <driver/gpio.h>
+#include "lwip/sockets.h"
+#include "main.h"
+
+
+
+
+#include "esp_log.h"
+#include "hal/uart_types.h"
+#include "lwip/err.h"
+#include "nvs_flash.h"
+#include "portmacro.h"
+#include "soc/gpio_num.h"
+#include "soc/uart_struct.h"
+#include "wifi.h"
+#include <inttypes.h>
+#include "Bootloader.h"
+#include "esp_netif.h"
+#include "uartread.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
+#include "driver/uart.h"
+#include "esp_intr_alloc.h"
+#include "https.h"
+// Global değişkenler
+
+// Global değişkenler
+TaskHandle_t uarttaskToTerminateHandle = NULL;
+
+#define BUFFER_SIZE   4*1024
+#define UART_QUEUE_SIZE 1
+ uint8_t data[BUFFER_SIZE];  // Belleği doğrudan ayırıyoruz.
+ 
+
+void init_gpio() {
+	 gpio_reset_pin(LED_PIN);
+    gpio_set_direction(LED_PIN, GPIO_MODE_OUTPUT); 
+}
+
+
+int led_state=0;                             
+void blink(){
+
+    led_state = !led_state;  // LED'in durumunu tersine çevir
+    gpio_set_level(LED_PIN, led_state);  // LED durumunu ayarla
+
+}
+
+void quickblink(){
+
+    gpio_set_level(LED_PIN, 1);
+    delay_ms(300);
+     gpio_set_level(LED_PIN, 0);
+    delay_ms(800);
+
+}
+
+
+void start_all_task(){
+    init_bootloader();
+    uartmaincontrol=true;
+    
+    //xTaskCreatePinnedToCore(uart_event_task, "uart_event_task", 8192, NULL, 7, NULL, 1);
+    xTaskCreatePinnedToCore(check_update_task, "check_update_task",16384*4, NULL, 8, NULL,1);
+}
+
+bool stop_all_task(){
+	uartmaincontrol=false;
+
+
+     if(uartoutflag){
+		  ESP_LOGI("TASK", "The tasks stop successfully");
+		 return true;
+	 }else {
+		  ESP_LOGW("TASK", "The tasks fail to stop successfully.");	 
+		  return false;
+
+    }
+}
+
+void stop_uart_task(){
+	uartmaincontrol=false;
+	//force_terminate_task(uarttaskToTerminateHandle);
+}
+
+void start_uart_task(){
+	init_uart();
+   uartmaincontrol=true;
+  // xTaskCreate(uart_event_task, "uart_data_event", 10240, NULL, 4, &uarttaskToTerminateHandle);
+   xTaskCreatePinnedToCore(uart_event_task, "uart_data_event", 8192, NULL, 7, NULL, 1);
+    
+}
+
+
+
+void app_main(void)
+{
+	
+	 init_gpio();  
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    
+    ESP_ERROR_CHECK(ret);
+    ESP_LOGI("main", "ESP_WIFI_MODE_STA");
+    bt_init();
+    wifi_init_sta();
+  
+  
+    
+
+    power_reset();
+    
+      ////////////////////////////////////////////////////////////////////////////////////////////////
+    while (true) {
+           //  printf("Free heap: %d\n", xPortGetFreeHeapSize());
+
+	    delay_ms(100);
+	    blink(); 
+	 /**  if (esprestartflag && stop_all_task()) {
+			ESP_LOGI("main", "OTA SUCCES RESTART");
+			stop_events=true; 
+			wifi_deinit_sta();
+			delay_ms(1000);
+			esp_restart();
+         */
+	    
+	   
+	               
+	
+    }              
+    
+    
+    
+}
+
+
+
+
+
