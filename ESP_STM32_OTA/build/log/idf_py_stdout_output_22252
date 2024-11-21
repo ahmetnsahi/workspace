@@ -1,0 +1,102 @@
+[1/5] cmd.exe /C "cd /D C:\Users\ahmet\workspace\ESP_STM32_OTA\build\esp-idf\esptool_py && C:\Espressif\python_env\idf5.3_py3.11_env\Scripts\python.exe C:/Espressif/frameworks/esp-idf-v5.3.1/components/partition_table/check_sizes.py --offset 0x8000 partition --type app C:/Users/ahmet/workspace/ESP_STM32_OTA/build/partition_table/partition-table.bin C:/Users/ahmet/workspace/ESP_STM32_OTA/build/app-template.bin"
+app-template.bin binary size 0x17e590 bytes. Smallest app partition is 0x1d0000 bytes. 0x51a70 bytes (18%) free.
+[2/5] Performing build step for 'bootloader'
+[1/1] cmd.exe /C "cd /D C:\Users\ahmet\workspace\ESP_STM32_OTA\build\bootloader\esp-idf\esptool_py && C:\Espressif\python_env\idf5.3_py3.11_env\Scripts\python.exe C:/Espressif/frameworks/esp-idf-v5.3.1/components/partition_table/check_sizes.py --offset 0x8000 bootloader 0x1000 C:/Users/ahmet/workspace/ESP_STM32_OTA/build/bootloader/bootloader.bin"
+Bootloader binary size 0x6880 bytes. 0x780 bytes (7%) free.
+[2/3] cmd.exe /C "cd /D C:\Espressif\frameworks\esp-idf-v5.3.1\components\esptool_py && C:\Espressif\tools\cmake\3.24.0\bin\cmake.exe -D IDF_PATH=C:/Espressif/frameworks/esp-idf-v5.3.1 -D SERIAL_TOOL=C:/Espressif/python_env/idf5.3_py3.11_env/Scripts/python.exe;;C:/Espressif/frameworks/esp-idf-v5.3.1/components/esptool_py/esptool/esptool.py;--chip;esp32 -D SERIAL_TOOL_ARGS=--before=default_reset;--after=hard_reset;write_flash;@flash_args -D WORKING_DIRECTORY=C:/Users/ahmet/workspace/ESP_STM32_OTA/build -P C:/Espressif/frameworks/esp-idf-v5.3.1/cesptool.py --chip esp32 -p COM13 -b 460800 --before=default_reset --after=hard_reset write_flash --flash_mode dio --flash_freq 80m --flash_size 4MB 0x1000 bootloader/bootloader.bin 0x10000 app-template.bin 0x8000 partition_table/partition-table.bin 0xd000 ota_data_initial.bin
+esptool.py v4.8.1
+Serial port COM13
+Connecting....
+Chip is ESP32-D0WDQ6 (revision v1.0)
+Features: WiFi, BT, Dual Core, 240MHz, VRef calibration in efuse, Coding Scheme None
+Crystal is 40MHz
+MAC: 80:7d:3a:ee:54:68
+Uploading stub...
+Running stub...
+Stub running...
+Changing baud rate to 460800
+Changed.
+Configuring flash size...
+Flash will be erased from 0x00001000 to 0x00007fff...
+Flash will be erased from 0x00010000 to 0x0018efff...
+Flash will be erased from 0x00008000 to 0x00008fff...
+Flash will be erased from 0x0000d000 to 0x0000efff...
+SHA digest in image updated
+Compressed 26752 bytes to 16375...
+Writing at 0x00001000... (100 %)
+Wrote 26752 bytes (16375 compressed) at 0x00001000 in 0.8 seconds (effective 266.4 kbit/s)...
+Hash of data verified.
+Compressed 1566096 bytes to 950936...
+Writing at 0x00010000... (1 %)
+Writing at 0x0001e8b8... (3 %)
+Writing at 0x0002ef23... (5 %)
+Writing at 0x0003ba67... (6 %)
+Writing at 0x000449d8... (8 %)
+Writing at 0x000494f8... (10 %)
+Writing at 0x000509a1... (11 %)
+Writing at 0x0005ccba... (13 %)
+Writing at 0x00062d1f... (15 %)
+Writing at 0x0006869f... (16 %)
+Writing at 0x0006e77e... (18 %)
+Writing at 0x0007428b... (20 %)
+Writing at 0x00079d2c... (22 %)
+Writing at 0x0007f7cc... (23 %)
+Writing at 0x0008565f... (25 %)
+Writing at 0x0008c260... (27 %)
+Writing at 0x0009216d... (28 %)
+Writing at 0x000981a6... (30 %)
+Writing at 0x0009e873... (32 %)
+Writing at 0x000a4c12... (33 %)
+Writing at 0x000ab160... (35 %)
+Writing at 0x000b10a4... (37 %)
+Writing at 0x000b71f1... (38 %)
+Writing at 0x000bd194... (40 %)
+Writing at 0x000c3416... (42 %)
+Writing at 0x000c97eb... (44 %)
+Writing at 0x000cf2f1... (45 %)
+Writing at 0x000d4f8e... (47 %)
+Writing at 0x000dac40... (49 %)
+Writing at 0x000e0874... (50 %)
+Writing at 0x000e68d4... (52 %)
+Writing at 0x000ec802... (54 %)
+Writing at 0x000f2541... (55 %)
+Writing at 0x000f8d2c... (57 %)
+Writing at 0x000fe264... (59 %)
+Writing at 0x00103622... (61 %)
+Writing at 0x00108aff... (62 %)
+Writing at 0x0010de6b... (64 %)
+Writing at 0x00113537... (66 %)
+Writing at 0x00118cc2... (67 %)
+Writing at 0x0011e82b... (69 %)
+Writing at 0x00123f42... (71 %)
+Writing at 0x00129cfd... (72 %)
+Writing at 0x001300a4... (74 %)
+Writing at 0x00135f92... (76 %)
+Writing at 0x0013b9b6... (77 %)
+Writing at 0x00141493... (79 %)
+Writing at 0x00146f02... (81 %)
+Writing at 0x0014d397... (83 %)
+Writing at 0x00152f9e... (84 %)
+Writing at 0x001591cd... (86 %)
+Writing at 0x00163a02... (88 %)
+Writing at 0x0016ad97... (89 %)
+Writing at 0x00171338... (91 %)
+Writing at 0x001773aa... (93 %)
+Writing at 0x0017ca40... (94 %)
+Writing at 0x00182d95... (96 %)
+Writing at 0x001888d7... (98 %)
+Writing at 0x0018e242... (100 %)
+Wrote 1566096 bytes (950936 compressed) at 0x00010000 in 22.0 seconds (effective 569.7 kbit/s)...
+Hash of data verified.
+Compressed 3072 bytes to 145...
+Writing at 0x00008000... (100 %)
+Wrote 3072 bytes (145 compressed) at 0x00008000 in 0.1 seconds (effective 347.6 kbit/s)...
+Hash of data verified.
+Compressed 8192 bytes to 31...
+Writing at 0x0000d000... (100 %)
+Wrote 8192 bytes (31 compressed) at 0x0000d000 in 0.1 seconds (effective 495.0 kbit/s)...
+Hash of data verified.
+
+Leaving...
+Hard resetting via RTS pin...
+omponents/esptool_py/run_serial_tool.cmake"
