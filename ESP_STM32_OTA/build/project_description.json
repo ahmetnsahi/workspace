@@ -1,7 +1,7 @@
 {
     "version":            "1.1",
     "project_name":       "app-template",
-    "project_version":    "9817906-dirty",
+    "project_version":    "f8ab9e3-dirty",
     "project_path":       "C:/Users/ahmet/workspace/ESP_STM32_OTA",
     "idf_path":           "C:/Espressif/frameworks/esp-idf-v5.3.1",
     "build_dir":          "C:/Users/ahmet/workspace/ESP_STM32_OTA/build",
